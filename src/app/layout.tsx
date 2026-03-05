@@ -1,24 +1,32 @@
-import type { Metadata } from 'next'
-import './globals.css'
-import { AuthProvider } from '@/contexts/AuthContext'
+import type { Metadata } from 'next';
+import './globals.css';
+import { AuthProvider } from '@/contexts/AuthContext';
+import { NextIntlClientProvider } from 'next-intl';
+import { getLocale, getMessages } from 'next-intl/server';
 
 export const metadata: Metadata = {
-  title: 'Parent Dashboard - מערכת ניהול לימודים',
+  title: 'TimeKid - מערכת ניהול לימודים',
   description: 'מערכת לניהול לוחות זמנים ומשימות לילדים',
-}
+};
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
+  const locale = await getLocale();
+  const messages = await getMessages();
+  const isRTL = locale === 'he';
+
   return (
-    <html lang="he" dir="rtl">
+    <html lang={locale} dir={isRTL ? 'rtl' : 'ltr'}>
       <body>
-        <AuthProvider>
-          {children}
-        </AuthProvider>
+        <NextIntlClientProvider messages={messages}>
+          <AuthProvider>
+            {children}
+          </AuthProvider>
+        </NextIntlClientProvider>
       </body>
     </html>
-  )
+  );
 }
