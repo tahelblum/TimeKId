@@ -1,11 +1,12 @@
 import { getRequestConfig } from 'next-intl/server';
+import { AbstractIntlMessages } from 'next-intl';
 import { headers } from 'next/headers';
 import heMessages from './messages/he.json';
 import enMessages from './messages/en.json';
 
-const messagesMap: Record<string, Record<string, unknown>> = {
-  he: heMessages as Record<string, unknown>,
-  en: enMessages as Record<string, unknown>,
+const messagesMap: Record<string, AbstractIntlMessages> = {
+  he: heMessages as AbstractIntlMessages,
+  en: enMessages as AbstractIntlMessages,
 };
 
 export default getRequestConfig(async () => {
