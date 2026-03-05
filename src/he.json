@@ -1,0 +1,41 @@
+{
+  "login": {
+    "welcome": "ברוכים הבאים",
+    "subtitle": "התחברו לחשבון ההורים שלכם",
+    "email": "אימייל",
+    "password": "סיסמה",
+    "submit": "התחבר",
+    "loading": "מתחבר...",
+    "noAccount": "אין לכם חשבון?",
+    "signupLink": "הירשמו כאן",
+    "failed": "התחברות נכשלה"
+  },
+  "signup": {
+    "title": "הרשמה",
+    "subtitle": "צרו חשבון הורים חדש",
+    "name": "שם מלא",
+    "namePlaceholder": "שם מלא",
+    "email": "אימייל",
+    "password": "סיסמה",
+    "confirmPassword": "אימות סיסמה",
+    "submit": "הירשם",
+    "loading": "נרשם...",
+    "hasAccount": "כבר יש לכם חשבון?",
+    "loginLink": "התחברו כאן",
+    "passwordMismatch": "הסיסמאות אינן תואמות",
+    "passwordTooShort": "הסיסמה חייבת להכיל לפחות 6 תווים",
+    "failed": "ההרשמה נכשלה"
+  },
+  "dashboard": {
+    "hello": "שלום",
+    "logout": "התנתק",
+    "myChildren": "הילדים שלי",
+    "subtitle": "נהלו את לוחות הזמנים והמשימות של הילדים שלכם",
+    "addChild": "הוסף ילד",
+    "noChildren": "אין ילדים רשומים",
+    "noChildrenSubtitle": "התחילו על ידי הוספת הילד הראשון שלכם",
+    "grade": "כיתה",
+    "username": "שם משתמש",
+    "loading": "טוען..."
+  }
+}
