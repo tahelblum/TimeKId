@@ -21,7 +21,7 @@ export default async function RootLayout({
   return (
     <html lang={locale} dir={isRTL ? 'rtl' : 'ltr'}>
       <body>
-        <NextIntlClientProvider messages={messages}>
+        <NextIntlClientProvider locale={locale} messages={messages}>
           <AuthProvider>
             {children}
           </AuthProvider>
