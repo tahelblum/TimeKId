@@ -46,8 +46,6 @@ export default function SignupForm() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700;800&display=swap');
-
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
         .signup-page {
