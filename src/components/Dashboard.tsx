@@ -37,7 +37,6 @@ export default function Dashboard() {
     return (
       <>
         <style>{`
-          @import url('https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@700&display=swap');
           .loading-screen {
             min-height: 100vh;
             display: flex;
