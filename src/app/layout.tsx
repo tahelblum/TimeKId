@@ -1,8 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { AuthProvider } from '@/contexts/AuthContext';
-import { NextIntlClientProvider } from 'next-intl';
-import heMessages from '../messages/he.json';
 
 export const metadata: Metadata = {
   title: 'TimeKid - מערכת ניהול לימודים',
@@ -25,11 +23,9 @@ export default function RootLayout({
         />
       </head>
       <body suppressHydrationWarning>
-        <NextIntlClientProvider locale="he" messages={heMessages}>
-          <AuthProvider>
-            {children}
-          </AuthProvider>
-        </NextIntlClientProvider>
+        <AuthProvider>
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );
