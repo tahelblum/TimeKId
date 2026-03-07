@@ -42,8 +42,7 @@ export default function LoginForm() {
         ))}
       </div>
       <div className="auth-card">
-        <p style={{textAlign: 'center', marginBottom: '1rem', fontWeight: 'bold'}}>this is claude code change example</p>
-        <div className="auth-icon">
+<div className="auth-icon">
           <LogIn size={36} color="white" strokeWidth={2.5} />
         </div>
         <h1 className="auth-title">ברוכים הבאים</h1>
