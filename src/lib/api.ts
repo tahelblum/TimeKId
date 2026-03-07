@@ -4,10 +4,6 @@ export const API_ENDPOINTS = {
   AUTH: {
     LOGIN: '/auth/login',
     SIGNUP: '/auth/signup',
-  },
-  CHILDREN: {
-    CREATE: '/children/create',
-    LIST: '/children/list',
-    ADD_PARENT: '/children/add-parent',
+    ME: '/auth/me',
   },
 };
