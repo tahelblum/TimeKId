@@ -6,4 +6,18 @@ export const API_ENDPOINTS = {
     SIGNUP: '/auth/signup',
     ME: '/auth/me',
   },
+  CHILDREN: {
+    LIST: '/children',
+    CREATE: '/children',
+    GET: (id: number) => `/children/${id}`,
+    TASKS: (id: number) => `/children/${id}/tasks`,
+    UPDATE_TASK: (childId: number, taskId: number) => `/children/${childId}/tasks/${taskId}`,
+    SECONDARY_PARENT: (id: number) => `/children/${id}/secondary-parent`,
+    COMPLIMENT: (id: number) => `/children/${id}/compliment`,
+    REMINDER: (id: number) => `/children/${id}/reminder`,
+  },
+  TASKS: {
+    BOT: '/tasks/bot',
+    FROM_DOCUMENT: '/tasks/from-document',
+  },
 };

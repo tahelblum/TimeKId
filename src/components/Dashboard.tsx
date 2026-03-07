@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { LogOut, UserPlus, Users } from 'lucide-react';
+import { API_URL, API_ENDPOINTS } from '@/lib/api';
 
 interface Child {
   id: number;
@@ -13,13 +14,31 @@ interface Child {
 }
 
 export default function Dashboard() {
-  const { user, logout, loading } = useAuth();
+  const { user, authToken, logout, loading } = useAuth();
   const router = useRouter();
   const [children, setChildren] = useState<Child[]>([]);
+  const [childrenLoading, setChildrenLoading] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (!loading && !user) router.push('/');
-  }, [user, loading, router]);
+    if (!loading && user && authToken) fetchChildren();
+  }, [user, loading, authToken]);
+
+  async function fetchChildren() {
+    setChildrenLoading(true);
+    try {
+      const res = await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.LIST}`, {
+        headers: { 'Authorization': `Bearer ${authToken}` },
+      });
+      if (!res.ok) throw new Error();
+      setChildren(await res.json());
+    } catch {
+      setError('שגיאה בטעינת הילדים');
+    } finally {
+      setChildrenLoading(false);
+    }
+  }
 
   const handleLogout = () => { logout(); router.push('/'); };
 
@@ -59,14 +78,17 @@ export default function Dashboard() {
             הוסף ילד
           </button>
         </div>
-        {children.length === 0 ? (
+        {error && <div className="error-box" style={{ marginBottom: 24 }}>{error}</div>}
+        {childrenLoading ? (
+          <div className="tasks-loading"><div className="spinner" /></div>
+        ) : children.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">
               <Users size={48} color="var(--color-primary)" />
             </div>
             <h3 className="empty-title">אין ילדים רשומים</h3>
             <p className="empty-sub">התחילו על ידי הוספת הילד הראשון שלכם</p>
-            <button className="btn-add" style={{margin: '0 auto', display: 'flex'}} onClick={() => router.push('/dashboard/create-child')}>
+            <button className="btn-add btn-add-centered" onClick={() => router.push('/dashboard/create-child')}>
               <UserPlus size={22} />
               הוסף ילד
             </button>
