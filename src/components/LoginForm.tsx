@@ -2,7 +2,6 @@
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
 import { LogIn } from 'lucide-react';
 
 export default function LoginForm() {
@@ -12,7 +11,6 @@ export default function LoginForm() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const router = useRouter();
-  const t = useTranslations('login');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,7 +20,7 @@ export default function LoginForm() {
       await login(email, password);
       router.push('/dashboard');
     } catch (err: any) {
-      setError(err.message || t('failed'));
+      setError(err.message || 'התחברות נכשלה');
     } finally {
       setLoading(false);
     }
@@ -33,7 +31,6 @@ export default function LoginForm() {
       <div className="auth-blob auth-blob-1" />
       <div className="auth-blob auth-blob-2" />
       <div className="auth-blob auth-blob-3" />
-
       <div className="stars-bg">
         {['⭐','🌟','✨','💫','⭐','🌟','✨'].map((s, i) => (
           <span key={i} className="star" style={{
@@ -44,32 +41,29 @@ export default function LoginForm() {
           }}>{s}</span>
         ))}
       </div>
-
       <div className="auth-card">
         <div className="auth-icon">
           <LogIn size={36} color="white" strokeWidth={2.5} />
         </div>
-        <h1 className="auth-title">{t('welcome')}</h1>
-        <p className="auth-subtitle">{t('subtitle')}</p>
-
+        <h1 className="auth-title">ברוכים הבאים</h1>
+        <p className="auth-subtitle">התחברו לחשבון ההורים שלכם</p>
         <form className="auth-form" onSubmit={handleSubmit}>
           {error && <div className="error-box">{error}</div>}
           <div className="form-field">
-            <label>{t('email')}</label>
+            <label>אימייל</label>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="your@email.com" />
           </div>
           <div className="form-field">
-            <label>{t('password')}</label>
+            <label>סיסמה</label>
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="••••••••" />
           </div>
           <button type="submit" className="btn-primary" disabled={loading}>
-            {loading ? t('loading') : t('submit')}
+            {loading ? 'מתחבר...' : 'התחבר'}
           </button>
         </form>
-
         <p className="auth-footer">
-          {t('noAccount')}{' '}
-          <a href="/signup">{t('signupLink')}</a>
+          אין לכם חשבון?{' '}
+          <a href="/signup">הירשמו כאן</a>
         </p>
       </div>
     </div>
