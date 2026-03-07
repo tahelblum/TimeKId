@@ -7,7 +7,7 @@ interface User {
   id: number;
   name: string;
   email: string;
-  subscription_status: string;
+  created_at: number;
 }
 
 interface AuthContextType {
