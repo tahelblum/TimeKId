@@ -125,6 +125,9 @@ export default function KidDashboard() {
   // Upcoming tests (7-day window)
   const [upcomingTests, setUpcomingTests] = useState<Task[]>([]);
 
+  // Full week data for the always-visible preview (independent of day/week view)
+  const [weekAllTasks, setWeekAllTasks] = useState<Task[]>([]);
+
   // Gamification
   const [points, setPoints] = useState(0);
   const [streak, setStreak] = useState(0);
@@ -192,6 +195,15 @@ export default function KidDashboard() {
     } catch { setTasks([]); } finally { setTasksLoading(false); }
   }, [currentDate, view, authToken]);
 
+  const fetchWeekAllTasks = useCallback(async () => {
+    const days = weekDays(currentDate);
+    const url = `${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${toAPIDate(days[0])}&end=${toAPIDate(days[6])}`;
+    try {
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${authToken}` } });
+      if (res.ok) setWeekAllTasks(await res.json());
+    } catch {}
+  }, [currentDate, authToken]);
+
   const fetchUpcomingTests = useCallback(async () => {
     try {
       const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -206,6 +218,7 @@ export default function KidDashboard() {
   }, [authToken]);
 
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
+  useEffect(() => { fetchWeekAllTasks(); }, [fetchWeekAllTasks]);
   useEffect(() => { fetchUpcomingTests(); }, [fetchUpcomingTests]);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
 
@@ -213,6 +226,7 @@ export default function KidDashboard() {
   async function toggleStatus(task: Task) {
     const next: Task['status'] = task.status === 'pending' ? 'in_progress' : task.status === 'in_progress' ? 'done' : 'pending';
     setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: next } : t));
+    setWeekAllTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: next } : t));
     if (next === 'done') {
       setCelebration(task);
       setUpcomingTests(prev => prev.filter(t => t.id !== task.id));
@@ -262,6 +276,7 @@ export default function KidDashboard() {
         body: JSON.stringify({ title: editForm.title, description: editForm.description, type: editForm.type, due_date }),
       });
       setTasks(prev => prev.map(t => t.id === editTask.id ? { ...t, title: editForm.title, description: editForm.description, type: editForm.type, due_date } : t));
+      setWeekAllTasks(prev => prev.map(t => t.id === editTask.id ? { ...t, title: editForm.title, description: editForm.description, type: editForm.type, due_date } : t));
       setEditTask(null);
     } catch {} finally { setEditLoading(false); }
   }
@@ -436,37 +451,56 @@ export default function KidDashboard() {
           </div>
         )}
 
-        {/* ── CALENDAR CONTROLS ── */}
-        <div className="kid-cal-controls">
-          <div className="kid-view-toggle">
-            <button className={`kid-view-btn${view === 'day' ? ' active' : ''}`} onClick={() => setView('day')}>יום</button>
-            <button className={`kid-view-btn${view === 'week' ? ' active' : ''}`} onClick={() => setView('week')}>שבוע</button>
+        {/* ── ALWAYS-VISIBLE WEEK PREVIEW ── */}
+        <div className="week-preview-wrap">
+          <div className="week-preview-header">
+            <button className="wpv-arrow" onClick={() => navDate(-7)}><ChevronRight size={16} /></button>
+            <span className="wpv-label">תצוגת שבוע</span>
+            <button className="wpv-arrow" onClick={() => navDate(7)}><ChevronLeft size={16} /></button>
           </div>
-          <div className="kid-cal-nav">
-            <button className="kid-nav-arrow" onClick={() => navDate(view === 'week' ? -7 : -1)}><ChevronRight size={20} /></button>
-            <span className="kid-date-label">{dateLabel}</span>
-            <button className="kid-nav-arrow" onClick={() => navDate(view === 'week' ? 7 : 1)}><ChevronLeft size={20} /></button>
-          </div>
-          <button className="kid-today-btn" onClick={() => { const d = new Date(); d.setHours(0, 0, 0, 0); setCurrentDate(d); }}>היום</button>
-        </div>
-
-        {/* ── WEEK STRIP ── */}
-        {view === 'week' && (
-          <div className="kid-week-strip">
+          <div className="week-preview">
             {wDays.map((day, i) => {
-              const cnt = tasks.filter(t => sameDay(new Date(t.due_date * 1000), day)).length;
-              const hasUrgent = tasks.some(t => sameDay(new Date(t.due_date * 1000), day) && urgencyKey(t.due_date, t.status) === 'today');
+              const dayTasks = weekAllTasks.filter(t => sameDay(new Date(t.due_date * 1000), day));
+              const pending = sortByUrgency(dayTasks.filter(t => t.status !== 'done'));
+              const doneCount = dayTasks.filter(t => t.status === 'done').length;
+              const hasTest = dayTasks.some(t => isTest(t) && t.status !== 'done');
+              const isSelected = sameDay(day, currentDate);
+              const isToday = sameDay(day, today);
+              const dotColors: Record<string, string> = {
+                overdue: '#FF6B6B', today: '#FF9F43', tomorrow: '#FFD93D',
+                soon: '#A8E063', later: '#C4BEFF', done: '#6BCB77',
+              };
               return (
-                <div key={i} className={`kid-week-day${sameDay(day, today) ? ' today' : ''}${hasUrgent ? ' has-urgent' : ''}`}
-                  onClick={() => { setCurrentDate(day); setView('day'); }}>
-                  <div className="kid-wday-name">{HEBREW_DAYS[day.getDay()]}</div>
-                  <div className="kid-wday-num">{day.getDate()}</div>
-                  {cnt > 0 && <div className="kid-wday-dot">{cnt}</div>}
+                <div
+                  key={i}
+                  className={`wpd${isSelected ? ' wpd-selected' : ''}${isToday ? ' wpd-today' : ''}`}
+                  onClick={() => { setCurrentDate(day); setView('day'); }}
+                >
+                  <div className="wpd-name">{HEBREW_DAYS[day.getDay()]}</div>
+                  <div className="wpd-num">{day.getDate()}</div>
+                  <div className="wpd-dots">
+                    {pending.slice(0, 3).map((t, di) => (
+                      <span key={di} className="wpd-dot" style={{ background: dotColors[urgencyKey(t.due_date, t.status)] }} />
+                    ))}
+                    {pending.length > 3 && <span className="wpd-more">+</span>}
+                  </div>
+                  {hasTest && <div className="wpd-test">📝</div>}
+                  {doneCount > 0 && pending.length === 0 && <div className="wpd-done-all">✓</div>}
                 </div>
               );
             })}
           </div>
-        )}
+        </div>
+
+        {/* ── CALENDAR CONTROLS ── */}
+        <div className="kid-cal-controls">
+          <div className="kid-view-toggle">
+            <button className={`kid-view-btn${view === 'day' ? ' active' : ''}`} onClick={() => setView('day')}>יום</button>
+            <button className={`kid-view-btn${view === 'week' ? ' active' : ''}`} onClick={() => setView('week')}>כל השבוע</button>
+          </div>
+          <span className="kid-date-label" style={{ flex: 1, textAlign: 'center' }}>{dateLabel}</span>
+          <button className="kid-today-btn" onClick={() => { const d = new Date(); d.setHours(0, 0, 0, 0); setCurrentDate(d); }}>היום</button>
+        </div>
 
         {/* ── TASK LIST ── */}
         <div className="kid-tasks-section">
