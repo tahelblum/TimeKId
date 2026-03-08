@@ -1,15 +1,16 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useChildAuth } from '@/contexts/ChildAuthContext';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle2, Circle, Clock, X, Send, Upload,
   FileText, Bot, ChevronLeft, ChevronRight,
-  Edit3, LogOut, BookOpen, Zap,
+  Edit3, LogOut, BookOpen, Zap, Play, Pause, Target,
 } from 'lucide-react';
 import { API_URL, API_ENDPOINTS } from '@/lib/api';
 
+// ─── Types ────────────────────────────────────────────────────────────────────
 interface Task {
   id: number;
   title: string;
@@ -18,77 +19,141 @@ interface Task {
   status: 'pending' | 'in_progress' | 'done';
   type: 'homework' | 'test' | 'activity' | 'other';
 }
+interface ChatMessage { role: 'user' | 'bot'; text: string; }
 
-interface ChatMessage {
-  role: 'user' | 'bot';
-  text: string;
-}
-
+// ─── Constants ────────────────────────────────────────────────────────────────
 const ENCOURAGING = [
-  'אתה פגז! 🔥', 'מדהים! המשך כך! ⭐', 'כל הכבוד! אתה מצטיין! 🏆',
+  'אתה פגז! 🔥', 'מדהים! המשך כך! ⭐', 'כל הכבוד! 🏆',
   'וואו! איזה הישג! 🎯', 'אתה מדהים! 💫', 'ניצחון! 🥇', 'סופר! 🎉',
+  'אחד על אחד! 💪', 'פאנטסטי! ✨',
 ];
-
 const HEBREW_DAYS = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 const HEBREW_MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
   'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+const FOCUS_MINUTES = 25;
+const TIMER_CIRCUMFERENCE = 2 * Math.PI * 54; // r=54
 
-function weekStart(date: Date): Date {
-  const d = new Date(date);
-  d.setDate(d.getDate() - d.getDay());
-  d.setHours(0, 0, 0, 0);
-  return d;
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function weekStart(d: Date): Date {
+  const r = new Date(d); r.setDate(r.getDate() - r.getDay()); r.setHours(0, 0, 0, 0); return r;
 }
-
-function weekDays(date: Date): Date[] {
-  const s = weekStart(date);
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(s); d.setDate(d.getDate() + i); return d;
-  });
+function weekDays(d: Date): Date[] {
+  const s = weekStart(d);
+  return Array.from({ length: 7 }, (_, i) => { const x = new Date(s); x.setDate(x.getDate() + i); return x; });
 }
-
 function sameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
-
 function toAPIDate(d: Date) { return d.toISOString().split('T')[0]; }
-
-function isTest(task: Task) {
-  const kw = ['מבחן', 'בוחן', 'טסט', 'בחינה'];
-  return task.type === 'test' || kw.some(k => task.title.includes(k));
+function isTest(t: Task) {
+  return t.type === 'test' || ['מבחן', 'בוחן', 'טסט', 'בחינה'].some(k => t.title.includes(k));
 }
-
-function daysUntil(ts: number) {
+function daysUntil(ts: number): number {
   const now = new Date(); now.setHours(0, 0, 0, 0);
   const due = new Date(ts * 1000); due.setHours(0, 0, 0, 0);
   return Math.round((due.getTime() - now.getTime()) / 86400000);
 }
-
-function tsFromDateStr(s: string) {
-  return Math.floor(new Date(s + 'T12:00:00').getTime() / 1000);
-}
-
+function tsFromDateStr(s: string) { return Math.floor(new Date(s + 'T12:00:00').getTime() / 1000); }
 function dateStrFromTs(ts: number) {
   const d = new Date(ts * 1000);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+function urgencyKey(ts: number, status: Task['status']): 'done' | 'overdue' | 'today' | 'tomorrow' | 'soon' | 'later' {
+  if (status === 'done') return 'done';
+  const d = daysUntil(ts);
+  if (d < 0) return 'overdue';
+  if (d === 0) return 'today';
+  if (d === 1) return 'tomorrow';
+  if (d <= 3) return 'soon';
+  return 'later';
+}
+function relativeDate(ts: number): string {
+  const d = daysUntil(ts);
+  if (d < 0) return `⚠️ באיחור של ${-d} ${-d === 1 ? 'יום' : 'ימים'}`;
+  if (d === 0) return '🔴 היום!';
+  if (d === 1) return '🟡 מחר';
+  if (d === 2) return '🟢 עוד יומיים';
+  return `🟢 עוד ${d} ימים`;
+}
+function sortByUrgency(tasks: Task[]): Task[] {
+  const order = { overdue: 0, today: 1, tomorrow: 2, soon: 3, later: 4, done: 5 };
+  return [...tasks].sort((a, b) => {
+    const ka = urgencyKey(a.due_date, a.status);
+    const kb = urgencyKey(b.due_date, b.status);
+    if (order[ka] !== order[kb]) return order[ka] - order[kb];
+    return a.due_date - b.due_date;
+  });
+}
 
+// ─── Points / Streak helpers (localStorage) ──────────────────────────────────
+function loadPoints(): number { return parseInt(localStorage.getItem('kid_points') || '0'); }
+function loadStreak(): number {
+  const raw = localStorage.getItem('kid_streak');
+  if (!raw) return 0;
+  const { lastDate, count } = JSON.parse(raw);
+  const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+  if (lastDate === new Date().toDateString() || lastDate === yesterday.toDateString()) return count;
+  return 0;
+}
+function earnPoints(n: number): number {
+  const next = loadPoints() + n;
+  localStorage.setItem('kid_points', String(next));
+  return next;
+}
+function updateStreak(): number {
+  const today = new Date().toDateString();
+  const raw = localStorage.getItem('kid_streak');
+  const prev = raw ? JSON.parse(raw) : { lastDate: '', count: 0 };
+  if (prev.lastDate === today) return prev.count;
+  const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+  const next = prev.lastDate === yesterday.toDateString() ? prev.count + 1 : 1;
+  localStorage.setItem('kid_streak', JSON.stringify({ lastDate: today, count: next }));
+  return next;
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
 export default function KidDashboard() {
   const { child, authToken, logout } = useChildAuth();
   const router = useRouter();
 
+  // Tasks & view
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
   const [view, setView] = useState<'day' | 'week'>('day');
-  const [currentDate, setCurrentDate] = useState(() => {
-    const d = new Date(); d.setHours(0, 0, 0, 0); return d;
-  });
+  const [currentDate, setCurrentDate] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; });
 
+  // Upcoming tests (7-day window)
   const [upcomingTests, setUpcomingTests] = useState<Task[]>([]);
+
+  // Gamification
+  const [points, setPoints] = useState(0);
+  const [streak, setStreak] = useState(0);
+  useEffect(() => { setPoints(loadPoints()); setStreak(loadStreak()); }, []);
+
+  // Celebration
   const [celebration, setCelebration] = useState<Task | null>(null);
   const [celebMsg] = useState(() => ENCOURAGING[Math.floor(Math.random() * ENCOURAGING.length)]);
+  useEffect(() => {
+    if (celebration) { const t = setTimeout(() => setCelebration(null), 3200); return () => clearTimeout(t); }
+  }, [celebration]);
 
-  // Edit
+  // Focus timer
+  const [focusTask, setFocusTask] = useState<Task | null>(null);
+  const [focusSec, setFocusSec] = useState(FOCUS_MINUTES * 60);
+  const [focusRunning, setFocusRunning] = useState(false);
+  const [focusDone, setFocusDone] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (focusRunning && focusSec > 0) {
+      timerRef.current = setInterval(() => {
+        setFocusSec(s => { if (s <= 1) { setFocusRunning(false); setFocusDone(true); return 0; } return s - 1; });
+      }, 1000);
+    } else { if (timerRef.current) clearInterval(timerRef.current); }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [focusRunning]);
+
+  // Edit task
   const [editTask, setEditTask] = useState<Task | null>(null);
   const [editForm, setEditForm] = useState({ title: '', description: '', due_date: '', type: 'homework' as Task['type'] });
   const [editLoading, setEditLoading] = useState(false);
@@ -101,7 +166,7 @@ export default function KidDashboard() {
   // Chat
   const [showChat, setShowChat] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    { role: 'bot', text: 'שלום! אני עוזר לך להוסיף משימות. ספר לי מה צריך לעשות! 📚' },
+    { role: 'bot', text: 'שלום! ספר לי מה צריך לעשות ואני אוסיף לרשימה שלך 📚' },
   ]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
@@ -114,17 +179,8 @@ export default function KidDashboard() {
   const [docLoading, setDocLoading] = useState(false);
   const [docSuccess, setDocSuccess] = useState('');
 
-  useEffect(() => { fetchTasks(); }, [currentDate, view]);
-  useEffect(() => { fetchUpcomingTests(); }, []);
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
-  useEffect(() => {
-    if (celebration) {
-      const t = setTimeout(() => setCelebration(null), 3000);
-      return () => clearTimeout(t);
-    }
-  }, [celebration]);
-
-  async function fetchTasks() {
+  // ─── Data fetching ─────────────────────────────────────────────────────────
+  const fetchTasks = useCallback(async () => {
     setTasksLoading(true);
     try {
       const days = weekDays(currentDate);
@@ -132,12 +188,11 @@ export default function KidDashboard() {
       const end = view === 'week' ? days[6] : currentDate;
       const url = `${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${toAPIDate(start)}&end=${toAPIDate(end)}`;
       const res = await fetch(url, { headers: { Authorization: `Bearer ${authToken}` } });
-      if (res.ok) setTasks(await res.json());
-      else setTasks([]);
+      if (res.ok) setTasks(await res.json()); else setTasks([]);
     } catch { setTasks([]); } finally { setTasksLoading(false); }
-  }
+  }, [currentDate, view, authToken]);
 
-  async function fetchUpcomingTests() {
+  const fetchUpcomingTests = useCallback(async () => {
     try {
       const today = new Date(); today.setHours(0, 0, 0, 0);
       const future = new Date(today); future.setDate(future.getDate() + 7);
@@ -145,17 +200,26 @@ export default function KidDashboard() {
       const res = await fetch(url, { headers: { Authorization: `Bearer ${authToken}` } });
       if (res.ok) {
         const all: Task[] = await res.json();
-        setUpcomingTests(all.filter(t => isTest(t) && t.status !== 'done' && daysUntil(t.due_date) >= 0 && daysUntil(t.due_date) <= 5));
+        setUpcomingTests(all.filter(t => isTest(t) && t.status !== 'done' && daysUntil(t.due_date) >= 0));
       }
     } catch {}
-  }
+  }, [authToken]);
 
+  useEffect(() => { fetchTasks(); }, [fetchTasks]);
+  useEffect(() => { fetchUpcomingTests(); }, [fetchUpcomingTests]);
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
+
+  // ─── Actions ───────────────────────────────────────────────────────────────
   async function toggleStatus(task: Task) {
     const next: Task['status'] = task.status === 'pending' ? 'in_progress' : task.status === 'in_progress' ? 'done' : 'pending';
     setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: next } : t));
     if (next === 'done') {
       setCelebration(task);
       setUpcomingTests(prev => prev.filter(t => t.id !== task.id));
+      const newPoints = earnPoints(10);
+      const newStreak = updateStreak();
+      setPoints(newPoints);
+      setStreak(newStreak);
     }
     try {
       await fetch(`${API_URL}${API_ENDPOINTS.CHILD.UPDATE_TASK(task.id)}`, {
@@ -166,12 +230,27 @@ export default function KidDashboard() {
     } catch {}
   }
 
+  function openFocus(task: Task, e?: React.MouseEvent) {
+    e?.stopPropagation();
+    setFocusTask(task);
+    setFocusSec(FOCUS_MINUTES * 60);
+    setFocusRunning(false);
+    setFocusDone(false);
+  }
+  function closeFocus() {
+    setFocusTask(null); setFocusRunning(false);
+    if (timerRef.current) clearInterval(timerRef.current);
+  }
+  async function completeFocusTask() {
+    if (focusTask) { await toggleStatus(focusTask); }
+    closeFocus();
+  }
+
   function openEdit(task: Task, e: React.MouseEvent) {
     e.stopPropagation();
     setEditTask(task);
     setEditForm({ title: task.title, description: task.description, due_date: dateStrFromTs(task.due_date), type: task.type });
   }
-
   async function saveEdit() {
     if (!editTask || !editForm.title.trim()) return;
     setEditLoading(true);
@@ -189,8 +268,7 @@ export default function KidDashboard() {
 
   async function sendChat() {
     if (!chatInput.trim() || chatLoading) return;
-    const msg = chatInput.trim();
-    setChatInput('');
+    const msg = chatInput.trim(); setChatInput('');
     setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
     setChatLoading(true);
     try {
@@ -211,13 +289,11 @@ export default function KidDashboard() {
     if (!docText.trim() && !docFile) return;
     setDocLoading(true);
     try {
-      const formData = new FormData();
-      if (docFile) formData.append('file', docFile);
-      if (docText) formData.append('text', docText);
+      const fd = new FormData();
+      if (docFile) fd.append('file', docFile);
+      if (docText) fd.append('text', docText);
       await fetch(`${API_URL}${API_ENDPOINTS.TASKS.FROM_DOCUMENT}`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${authToken}` },
-        body: formData,
+        method: 'POST', headers: { Authorization: `Bearer ${authToken}` }, body: fd,
       });
       setDocSuccess('מעולה! המשימות נוספו מהמסמך! ✅');
       setDocText(''); setDocFile(null);
@@ -228,28 +304,30 @@ export default function KidDashboard() {
   async function scheduleStudy() {
     if (!schedulerTest) return;
     setSchedulerLoading(true);
-    const sessions = studySessions.filter(s => s.trim());
-    for (const session of sessions) {
-      const msg = `לימוד לפני מבחן: ${schedulerTest.title} בתאריך ${session}`;
+    for (const s of studySessions.filter(s => s.trim())) {
       try {
         await fetch(`${API_URL}${API_ENDPOINTS.TASKS.BOT}`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: msg }),
+          body: JSON.stringify({ message: `לימוד לפני מבחן: ${schedulerTest.title} בתאריך ${s}` }),
         });
       } catch {}
     }
-    setSchedulerTest(null);
-    setStudySessions(['']);
-    setSchedulerLoading(false);
+    setSchedulerTest(null); setStudySessions(['']); setSchedulerLoading(false);
     fetchTasks(); fetchUpcomingTests();
   }
 
+  // ─── Derived ───────────────────────────────────────────────────────────────
   const wDays = weekDays(currentDate);
   const today = new Date();
-  const visibleTasks = view === 'day'
+
+  const rawVisible = view === 'day'
     ? tasks.filter(t => sameDay(new Date(t.due_date * 1000), currentDate))
     : tasks;
+  const visibleTasks = sortByUrgency(rawVisible);
+  const doneCnt = visibleTasks.filter(t => t.status === 'done').length;
+  const pendingTasks = visibleTasks.filter(t => t.status !== 'done');
+  const heroTask = pendingTasks[0] || null;
 
   const dateLabel = view === 'day'
     ? `${HEBREW_DAYS[currentDate.getDay()]}, ${currentDate.getDate()} ${HEBREW_MONTHS[currentDate.getMonth()]}`
@@ -260,32 +338,46 @@ export default function KidDashboard() {
   });
 
   const typeEmoji = (t: Task['type']) => ({ homework: '📚', test: '📝', activity: '🎨', other: '✏️' }[t]);
-
-  const statusIcon = (s: Task['status']) => {
-    if (s === 'done') return <CheckCircle2 size={26} color="#6BCB77" />;
-    if (s === 'in_progress') return <Clock size={26} color="#74B9FF" />;
-    return <Circle size={26} color="#C4BEFF" />;
+  const statusIcon = (s: Task['status'], big = false) => {
+    const size = big ? 30 : 24;
+    if (s === 'done') return <CheckCircle2 size={size} color="#6BCB77" />;
+    if (s === 'in_progress') return <Clock size={size} color="#74B9FF" />;
+    return <Circle size={size} color="#C4BEFF" />;
   };
+  const urgencyLabel = { overdue: 'באיחור!', today: 'היום', tomorrow: 'מחר', soon: 'בקרוב', later: '', done: '' };
 
-  const statusLabel = (s: Task['status']) => ({ done: 'הושלם ✅', in_progress: 'בתהליך ⏳', pending: 'ממתין' }[s]);
+  // Focus timer display
+  const focusProgress = focusSec / (FOCUS_MINUTES * 60);
+  const strokeOffset = TIMER_CIRCUMFERENCE * (1 - focusProgress);
+  const focusMin = String(Math.floor(focusSec / 60)).padStart(2, '0');
+  const focusSc = String(focusSec % 60).padStart(2, '0');
 
+  // Rank
+  const rank = points < 50 ? '🌱 מתחיל' : points < 150 ? '⭐ עולה' : points < 300 ? '🚀 מתקדם' : '🏆 אלוף';
+
+  // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="kid-app">
-      {/* Header */}
+
+      {/* ── HEADER ── */}
       <header className="kid-header">
         <div className="kid-avatar">{child?.name?.charAt(0)}</div>
         <div className="kid-header-info">
           <div className="kid-header-name">שלום, {child?.name}! 👋</div>
-          <div className="kid-header-grade">כיתה {child?.grade}</div>
+          <div className="kid-rank">{rank}</div>
         </div>
-        <button className="kid-logout-btn" onClick={() => { logout(); router.push('/child-app'); }} title="יציאה">
+        <div className="kid-header-stats">
+          {streak > 0 && <div className="streak-badge">🔥 {streak}</div>}
+          <div className="points-badge">⭐ {points}</div>
+        </div>
+        <button className="kid-logout-btn" onClick={() => { logout(); router.push('/child-app'); }}>
           <LogOut size={18} />
         </button>
       </header>
 
       <main className="kid-main">
 
-        {/* Test reminder banners */}
+        {/* ── TEST BANNERS ── */}
         {upcomingTests.length > 0 && (
           <div className="test-banners">
             {upcomingTests.map(test => {
@@ -306,7 +398,45 @@ export default function KidDashboard() {
           </div>
         )}
 
-        {/* Calendar controls */}
+        {/* ── HERO: NEXT TASK ── */}
+        {heroTask && (
+          <div className={`kid-hero hero-${urgencyKey(heroTask.due_date, heroTask.status)}`}>
+            <div className="hero-label">
+              <Target size={14} />
+              המשימה הבאה שלי
+            </div>
+            <div className="hero-title">
+              <span>{typeEmoji(heroTask.type)}</span>
+              {heroTask.title}
+            </div>
+            {heroTask.description && <div className="hero-desc">{heroTask.description}</div>}
+            <div className="hero-time">{relativeDate(heroTask.due_date)}</div>
+            <div className="hero-actions">
+              <button className="hero-focus-btn" onClick={() => openFocus(heroTask)}>
+                <Play size={16} />
+                התחל עכשיו ⏱
+              </button>
+              <button className="hero-done-btn" onClick={() => toggleStatus(heroTask)}>
+                {statusIcon(heroTask.status)}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── PROGRESS BAR ── */}
+        {visibleTasks.length > 0 && (
+          <div className="kid-progress-wrap">
+            <div className="kid-progress-label">
+              <span>{doneCnt} / {visibleTasks.length} הושלמו</span>
+              <span>{Math.round((doneCnt / visibleTasks.length) * 100)}%</span>
+            </div>
+            <div className="kid-progress-bar">
+              <div className="kid-progress-fill" style={{ width: `${(doneCnt / visibleTasks.length) * 100}%` }} />
+            </div>
+          </div>
+        )}
+
+        {/* ── CALENDAR CONTROLS ── */}
         <div className="kid-cal-controls">
           <div className="kid-view-toggle">
             <button className={`kid-view-btn${view === 'day' ? ' active' : ''}`} onClick={() => setView('day')}>יום</button>
@@ -320,13 +450,15 @@ export default function KidDashboard() {
           <button className="kid-today-btn" onClick={() => { const d = new Date(); d.setHours(0, 0, 0, 0); setCurrentDate(d); }}>היום</button>
         </div>
 
-        {/* Week strip */}
+        {/* ── WEEK STRIP ── */}
         {view === 'week' && (
           <div className="kid-week-strip">
             {wDays.map((day, i) => {
               const cnt = tasks.filter(t => sameDay(new Date(t.due_date * 1000), day)).length;
+              const hasUrgent = tasks.some(t => sameDay(new Date(t.due_date * 1000), day) && urgencyKey(t.due_date, t.status) === 'today');
               return (
-                <div key={i} className={`kid-week-day${sameDay(day, today) ? ' today' : ''}`} onClick={() => { setCurrentDate(day); setView('day'); }}>
+                <div key={i} className={`kid-week-day${sameDay(day, today) ? ' today' : ''}${hasUrgent ? ' has-urgent' : ''}`}
+                  onClick={() => { setCurrentDate(day); setView('day'); }}>
                   <div className="kid-wday-name">{HEBREW_DAYS[day.getDay()]}</div>
                   <div className="kid-wday-num">{day.getDate()}</div>
                   {cnt > 0 && <div className="kid-wday-dot">{cnt}</div>}
@@ -336,26 +468,10 @@ export default function KidDashboard() {
           </div>
         )}
 
-        {/* Progress bar */}
-        {visibleTasks.length > 0 && (
-          <div className="kid-progress-wrap">
-            <div className="kid-progress-label">
-              <span>{visibleTasks.filter(t => t.status === 'done').length} / {visibleTasks.length} הושלמו</span>
-              <span>{Math.round((visibleTasks.filter(t => t.status === 'done').length / visibleTasks.length) * 100)}%</span>
-            </div>
-            <div className="kid-progress-bar">
-              <div
-                className="kid-progress-fill"
-                style={{ width: `${(visibleTasks.filter(t => t.status === 'done').length / visibleTasks.length) * 100}%` }}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Tasks */}
+        {/* ── TASK LIST ── */}
         <div className="kid-tasks-section">
           <div className="kid-tasks-header">
-            <h2 className="kid-tasks-title">המשימות שלי</h2>
+            <h2 className="kid-tasks-title">כל המשימות</h2>
             <span className="kid-tasks-count">{visibleTasks.length}</span>
           </div>
 
@@ -369,45 +485,60 @@ export default function KidDashboard() {
             </div>
           ) : (
             <div className="kid-task-list">
-              {visibleTasks.map(task => (
-                <div key={task.id} className={`kid-task kid-task-${task.status}${isTest(task) ? ' kid-task-test' : ''}`} onClick={() => toggleStatus(task)}>
-                  <div className="kid-task-check">{statusIcon(task.status)}</div>
-                  <div className="kid-task-body">
-                    <div className="kid-task-title-row">
-                      <span className="kid-task-emoji">{typeEmoji(task.type)}</span>
-                      <span className={`kid-task-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
+              {visibleTasks.map(task => {
+                const uk = urgencyKey(task.due_date, task.status);
+                return (
+                  <div key={task.id} className={`kid-task urgency-${uk}${isTest(task) && uk !== 'done' ? ' is-test' : ''}`}
+                    onClick={() => toggleStatus(task)}>
+                    <div className="kid-task-left">
+                      <div className="kid-task-check">{statusIcon(task.status)}</div>
                     </div>
-                    {task.description && <div className="kid-task-desc">{task.description}</div>}
-                    <div className="kid-task-footer">
-                      <span className="kid-task-date">
-                        {new Date(task.due_date * 1000).toLocaleDateString('he-IL', { weekday: 'short', day: 'numeric', month: 'short' })}
-                      </span>
-                      <span className={`kid-task-badge kid-badge-${task.status}`}>{statusLabel(task.status)}</span>
+                    <div className="kid-task-body">
+                      <div className="kid-task-title-row">
+                        <span className="kid-task-emoji">{typeEmoji(task.type)}</span>
+                        <span className={`kid-task-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
+                        {uk !== 'done' && uk !== 'later' && (
+                          <span className={`urgency-chip chip-${uk}`}>{urgencyLabel[uk]}</span>
+                        )}
+                      </div>
+                      {task.description && <div className="kid-task-desc">{task.description}</div>}
+                      <div className="kid-task-footer">
+                        <span className="kid-task-reldate">{relativeDate(task.due_date)}</span>
+                      </div>
+                    </div>
+                    <div className="kid-task-actions">
+                      {task.status !== 'done' && (
+                        <button className="kid-focus-mini" onClick={e => openFocus(task, e)} title="התמקד">
+                          <Play size={13} />
+                        </button>
+                      )}
+                      <button className="kid-edit-btn" onClick={e => openEdit(task, e)} title="עריכה">
+                        <Edit3 size={14} />
+                      </button>
                     </div>
                   </div>
-                  <button className="kid-edit-btn" onClick={e => openEdit(task, e)} title="עריכה">
-                    <Edit3 size={15} />
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
       </main>
 
-      {/* FAB bar */}
+      {/* ── FAB BAR ── */}
       <div className="kid-fab-bar">
-        <button className="kid-fab kid-fab-chat" onClick={() => { setShowChat(true); }}>
-          <Bot size={22} />
-          <span>צ&apos;אט</span>
+        <button className="kid-fab kid-fab-chat" onClick={() => setShowChat(true)}>
+          <Bot size={22} /><span>צ&apos;אט</span>
         </button>
         <button className="kid-fab kid-fab-doc" onClick={() => { setDocSuccess(''); setShowDocument(true); }}>
-          <FileText size={22} />
-          <span>מסמך</span>
+          <FileText size={22} /><span>מסמך</span>
         </button>
       </div>
 
-      {/* ===== CELEBRATION OVERLAY ===== */}
+      {/* ══════════════════════════════════════════════════════════
+          OVERLAYS & MODALS
+      ══════════════════════════════════════════════════════════ */}
+
+      {/* ── CELEBRATION ── */}
       {celebration && (
         <div className="celebration-overlay" onClick={() => setCelebration(null)}>
           <div className="celebration-card">
@@ -415,12 +546,69 @@ export default function KidDashboard() {
             <div className="celebration-title">כל הכבוד!</div>
             <div className="celebration-task-name">{celebration.title}</div>
             <div className="celebration-msg">{celebMsg}</div>
-            <div className="celebration-stars">⭐ ⭐ ⭐</div>
+            <div className="celebration-points">+10 ⭐</div>
+            <div className="celebration-stars">✨ ✨ ✨</div>
           </div>
         </div>
       )}
 
-      {/* ===== EDIT TASK MODAL ===== */}
+      {/* ── FOCUS TIMER ── */}
+      {focusTask && (
+        <div className="focus-overlay">
+          <div className="focus-card">
+            <button className="focus-close" onClick={closeFocus}><X size={20} /></button>
+            <div className="focus-task-emoji">{typeEmoji(focusTask.type)}</div>
+            <div className="focus-task-title">{focusTask.title}</div>
+            <div className="focus-mode-label">מצב ריכוז — {FOCUS_MINUTES} דקות</div>
+
+            {/* Circular SVG timer */}
+            <div className="focus-timer-wrap">
+              <svg viewBox="0 0 120 120" width="200" height="200">
+                <circle cx="60" cy="60" r="54" fill="none" stroke="#E8E6FF" strokeWidth="8" />
+                <circle
+                  cx="60" cy="60" r="54"
+                  fill="none"
+                  stroke={focusDone ? '#6BCB77' : focusSec < 120 ? '#FF6B6B' : '#6C63FF'}
+                  strokeWidth="8"
+                  strokeDasharray={TIMER_CIRCUMFERENCE}
+                  strokeDashoffset={strokeOffset}
+                  strokeLinecap="round"
+                  transform="rotate(-90 60 60)"
+                  style={{ transition: 'stroke-dashoffset 1s linear' }}
+                />
+                <text x="60" y="56" textAnchor="middle" fontSize="26" fontWeight="800" fill="#2C2C54" fontFamily="Fredoka One, cursive">
+                  {focusMin}:{focusSc}
+                </text>
+                <text x="60" y="74" textAnchor="middle" fontSize="11" fill="#8888AA" fontWeight="600">
+                  {focusDone ? 'סיימת! 🎉' : 'דקות נותרו'}
+                </text>
+              </svg>
+            </div>
+
+            {focusDone ? (
+              <div className="focus-done-msg">
+                <div>⏰ הזמן הסתיים! האם סיימת?</div>
+              </div>
+            ) : (
+              <button className="focus-play-btn" onClick={() => setFocusRunning(r => !r)}>
+                {focusRunning ? <><Pause size={20} /> עצור</> : <><Play size={20} /> {focusSec === FOCUS_MINUTES * 60 ? 'התחל' : 'המשך'}</>}
+              </button>
+            )}
+
+            <div className="focus-action-row">
+              <button className="focus-done-btn" onClick={completeFocusTask}>
+                <CheckCircle2 size={18} />
+                סיימתי את המשימה! ✅
+              </button>
+              <button className="focus-exit-btn" onClick={closeFocus}>
+                יציאה בלי לסיים
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── EDIT TASK ── */}
       {editTask && (
         <div className="modal-overlay" onClick={() => setEditTask(null)}>
           <div className="modal-card" onClick={e => e.stopPropagation()}>
@@ -462,7 +650,7 @@ export default function KidDashboard() {
         </div>
       )}
 
-      {/* ===== STUDY SCHEDULER MODAL ===== */}
+      {/* ── STUDY SCHEDULER ── */}
       {schedulerTest && (
         <div className="modal-overlay" onClick={() => setSchedulerTest(null)}>
           <div className="modal-card" onClick={e => e.stopPropagation()}>
@@ -475,17 +663,13 @@ export default function KidDashboard() {
               <p className="modal-sub">מבחן: <strong>{schedulerTest.title}</strong></p>
             </div>
             <p style={{ color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: 16, fontSize: '0.95rem' }}>
-              בחר מתי תלמד לפני המבחן:
+              מתי תשב ללמוד? בחר תאריך ושעה:
             </p>
             {studySessions.map((s, i) => (
               <div key={i} className="form-field" style={{ marginBottom: 12 }}>
-                <label>מפגש לימוד {i + 1}</label>
-                <input
-                  type="datetime-local"
-                  className="form-select"
-                  value={s}
-                  onChange={e => setStudySessions(prev => prev.map((x, j) => j === i ? e.target.value : x))}
-                />
+                <label>מפגש {i + 1}</label>
+                <input type="datetime-local" className="form-select" value={s}
+                  onChange={e => setStudySessions(p => p.map((x, j) => j === i ? e.target.value : x))} />
               </div>
             ))}
             {studySessions.length < 3 && (
@@ -493,11 +677,8 @@ export default function KidDashboard() {
                 + הוסף מפגש נוסף
               </button>
             )}
-            <button
-              className="btn-primary"
-              onClick={scheduleStudy}
-              disabled={schedulerLoading || !studySessions.some(s => s.trim())}
-            >
+            <button className="btn-primary" onClick={scheduleStudy}
+              disabled={schedulerLoading || !studySessions.some(s => s.trim())}>
               <Zap size={18} style={{ marginLeft: 8 }} />
               {schedulerLoading ? 'יוצר...' : 'צור משימות לימוד'}
             </button>
@@ -505,7 +686,7 @@ export default function KidDashboard() {
         </div>
       )}
 
-      {/* ===== CHAT MODAL ===== */}
+      {/* ── CHAT ── */}
       {showChat && (
         <div className="modal-overlay" onClick={() => setShowChat(false)}>
           <div className="modal-card" onClick={e => e.stopPropagation()}>
@@ -527,21 +708,17 @@ export default function KidDashboard() {
               <div ref={chatEndRef} />
             </div>
             <div className="chat-input-row">
-              <input
-                type="text"
-                className="chat-input"
+              <input type="text" className="chat-input"
                 placeholder="לדוגמה: מבחן במתמטיקה ביום שלישי..."
-                value={chatInput}
-                onChange={e => setChatInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && sendChat()}
-              />
+                value={chatInput} onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && sendChat()} />
               <button className="chat-send" onClick={sendChat} disabled={chatLoading}><Send size={18} /></button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ===== DOCUMENT MODAL ===== */}
+      {/* ── DOCUMENT ── */}
       {showDocument && (
         <div className="modal-overlay" onClick={() => setShowDocument(false)}>
           <div className="modal-card" onClick={e => e.stopPropagation()}>
@@ -558,20 +735,17 @@ export default function KidDashboard() {
                 <div className="upload-area" onClick={() => document.getElementById('kid-file-upload')?.click()}>
                   <Upload size={32} color="var(--color-primary)" />
                   <p>{docFile ? docFile.name : 'לחץ להעלאת קובץ (PDF, Word, תמונה)'}</p>
-                  <input
-                    id="kid-file-upload"
-                    type="file"
-                    accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
-                    style={{ display: 'none' }}
-                    onChange={e => setDocFile(e.target.files?.[0] || null)}
-                  />
+                  <input id="kid-file-upload" type="file" accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
+                    style={{ display: 'none' }} onChange={e => setDocFile(e.target.files?.[0] || null)} />
                 </div>
                 <div className="modal-divider">או</div>
                 <div className="form-field">
                   <label>הדבק טקסט</label>
-                  <textarea className="form-textarea" value={docText} onChange={e => setDocText(e.target.value)} placeholder="הדבק כאן שיעורי בית, רשימת משימות..." rows={4} />
+                  <textarea className="form-textarea" value={docText} onChange={e => setDocText(e.target.value)}
+                    placeholder="הדבק כאן שיעורי בית, רשימת משימות..." rows={4} />
                 </div>
-                <button className="btn-primary" onClick={submitDocument} disabled={docLoading || (!docText.trim() && !docFile)}>
+                <button className="btn-primary" onClick={submitDocument}
+                  disabled={docLoading || (!docText.trim() && !docFile)}>
                   {docLoading ? 'מעבד...' : 'צור משימות מהמסמך'}
                 </button>
               </>
