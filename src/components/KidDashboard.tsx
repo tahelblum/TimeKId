@@ -5,7 +5,7 @@ import { useChildAuth } from '@/contexts/ChildAuthContext';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle2, Circle, Clock, X, Send,
-  FileText, Bot, ChevronLeft, ChevronRight,
+  Bot, ChevronLeft, ChevronRight,
   Edit3, LogOut, BookOpen, Zap, Play, Pause, Target, Paperclip,
 } from 'lucide-react';
 import { API_URL, API_ENDPOINTS } from '@/lib/api';
@@ -566,9 +566,6 @@ export default function KidDashboard() {
       <div className="kid-fab-bar">
         <button className="kid-fab kid-fab-chat" onClick={() => setShowChat(true)}>
           <Bot size={22} /><span>צ&apos;אט</span>
-        </button>
-        <button className="kid-fab kid-fab-doc" onClick={() => setShowChat(true)}>
-          <FileText size={22} /><span>מסמך</span>
         </button>
       </div>
 
