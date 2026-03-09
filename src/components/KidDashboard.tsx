@@ -90,9 +90,11 @@ function loadPoints(): number { return parseInt(localStorage.getItem('kid_points
 function loadStreak(): number {
   const raw = localStorage.getItem('kid_streak');
   if (!raw) return 0;
-  const { lastDate, count } = JSON.parse(raw);
-  const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
-  if (lastDate === new Date().toDateString() || lastDate === yesterday.toDateString()) return count;
+  try {
+    const { lastDate, count } = JSON.parse(raw);
+    const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+    if (lastDate === new Date().toDateString() || lastDate === yesterday.toDateString()) return count;
+  } catch { /* corrupted data */ }
   return 0;
 }
 function earnPoints(n: number): number {

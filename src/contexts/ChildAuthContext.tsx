@@ -29,8 +29,13 @@ export function ChildAuthProvider({ children }: { children: React.ReactNode }) {
     const savedToken = localStorage.getItem('childAuthToken');
     const savedChild = localStorage.getItem('childData');
     if (savedToken && savedChild) {
-      setAuthToken(savedToken);
-      setChild(JSON.parse(savedChild));
+      try {
+        setAuthToken(savedToken);
+        setChild(JSON.parse(savedChild));
+      } catch {
+        localStorage.removeItem('childAuthToken');
+        localStorage.removeItem('childData');
+      }
     }
     setLoading(false);
   }, []);
