@@ -311,13 +311,14 @@ export default function KidDashboard() {
     setChatMessages(prev => [...prev, { role: 'user', text: `📎 ${file.name}` }]);
     setChatLoading(true);
     try {
-      const text = await file.text();
+      const text = (await file.text()).substring(0, 8000);
       const res = await fetch('https://tahelblum.app.n8n.cloud/webhook/kidtime-bot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file_content: text, child_id: child?.id, auth_token: authToken }),
       });
-      const data = await res.json();
+      const raw = await res.text();
+      const data = raw ? JSON.parse(raw) : {};
       setChatMessages(prev => [...prev, { role: 'bot', text: data.reply || 'מעולה! המשימות נוספו מהמסמך! ✅' }]);
       fetchTasks(); fetchUpcomingTests();
     } catch {

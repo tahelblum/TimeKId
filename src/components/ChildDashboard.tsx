@@ -174,16 +174,17 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     setBotMessages(prev => [...prev, { role: 'user', text: `📎 ${file.name}` }]);
     setBotLoading(true);
     try {
-      const text = await file.text();
+      const text = (await file.text()).substring(0, 8000);
       const res = await fetch(N8N_WEBHOOK, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file_content: text, child_id: childId, auth_token: authToken }),
       });
-      const data = await res.json();
+      const raw = await res.text();
+      const data = raw ? JSON.parse(raw) : {};
       setBotMessages(prev => [...prev, { role: 'bot', text: data.reply || 'מעולה! המשימות נוספו מהמסמך! ✅' }]);
       fetchTasks();
-    } catch {
+    } catch (e) {
       setBotMessages(prev => [...prev, { role: 'bot', text: 'שגיאה בעיבוד הקובץ. נסה שוב.' }]);
     } finally { setBotLoading(false); }
   }
