@@ -193,7 +193,7 @@ export default function KidDashboard() {
       const end = view === 'week' ? days[6] : currentDate;
       const url = `${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${toAPIDate(start)}&end=${toAPIDate(end)}`;
       const res = await fetch(url, { headers: { Authorization: `Bearer ${authToken}` } });
-      if (res.ok) setTasks(await res.json()); else setTasks([]);
+      if (res.ok) { const d = await res.json(); setTasks(Array.isArray(d) ? d : (d.items ?? [])); } else setTasks([]);
     } catch { setTasks([]); } finally { setTasksLoading(false); }
   }, [currentDate, view, authToken]);
 
@@ -202,7 +202,7 @@ export default function KidDashboard() {
     const url = `${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${toAPIDate(days[0])}&end=${toAPIDate(days[6])}`;
     try {
       const res = await fetch(url, { headers: { Authorization: `Bearer ${authToken}` } });
-      if (res.ok) setWeekAllTasks(await res.json());
+      if (res.ok) { const d = await res.json(); setWeekAllTasks(Array.isArray(d) ? d : (d.items ?? [])); }
     } catch {}
   }, [currentDate, authToken]);
 
@@ -213,7 +213,7 @@ export default function KidDashboard() {
       const url = `${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${toAPIDate(today)}&end=${toAPIDate(future)}`;
       const res = await fetch(url, { headers: { Authorization: `Bearer ${authToken}` } });
       if (res.ok) {
-        const all: Task[] = await res.json();
+        const raw = await res.json(); const all: Task[] = Array.isArray(raw) ? raw : (raw.items ?? []);
         setUpcomingTests(all.filter(t => isTest(t) && t.status !== 'done' && daysUntil(t.due_date) >= 0));
       }
     } catch {}

@@ -32,7 +32,7 @@ export default function Dashboard() {
         headers: { 'Authorization': `Bearer ${authToken}` },
       });
       if (!res.ok) throw new Error();
-      setChildren(await res.json());
+      const d = await res.json(); setChildren(Array.isArray(d) ? d : (d.items ?? []));
     } catch {
       setError('שגיאה בטעינת הילדים');
     } finally {

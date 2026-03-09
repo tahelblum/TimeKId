@@ -120,7 +120,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
       const end = view === 'week' ? weekDays[6] : currentDate;
       const url = `${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}?start=${formatDateForAPI(start)}&end=${formatDateForAPI(end)}`;
       const res = await fetch(url, { headers: { 'Authorization': `Bearer ${authToken}` } });
-      if (res.ok) setTasks(await res.json());
+      if (res.ok) { const d = await res.json(); setTasks(Array.isArray(d) ? d : (d.items ?? [])); }
       else setTasks([]);
     } catch {
       setTasks([]);
