@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useChildAuth } from '@/contexts/ChildAuthContext';
 import { useRouter } from 'next/navigation';
 import {
-  CheckCircle2, Circle, Clock, X, Send, Upload,
+  CheckCircle2, Circle, Clock, X, Send,
   FileText, Bot, ChevronLeft, ChevronRight,
   Edit3, LogOut, BookOpen, Zap, Play, Pause, Target, Paperclip,
 } from 'lucide-react';
@@ -179,12 +179,6 @@ export default function KidDashboard() {
   const chatFileRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Document
-  const [showDocument, setShowDocument] = useState(false);
-  const [docText, setDocText] = useState('');
-  const [docFile, setDocFile] = useState<File | null>(null);
-  const [docLoading, setDocLoading] = useState(false);
-  const [docSuccess, setDocSuccess] = useState('');
 
   // ─── Data fetching ─────────────────────────────────────────────────────────
   const fetchTasks = useCallback(async () => {
@@ -324,22 +318,6 @@ export default function KidDashboard() {
     } catch {
       setChatMessages(prev => [...prev, { role: 'bot', text: 'אירעה שגיאה בעיבוד הקובץ.' }]);
     } finally { setChatLoading(false); }
-  }
-
-  async function submitDocument() {
-    if (!docText.trim() && !docFile) return;
-    setDocLoading(true);
-    try {
-      const fd = new FormData();
-      if (docFile) fd.append('file', docFile);
-      if (docText) fd.append('text', docText);
-      await fetch(`${API_URL}${API_ENDPOINTS.TASKS.FROM_DOCUMENT}`, {
-        method: 'POST', headers: { Authorization: `Bearer ${authToken}` }, body: fd,
-      });
-      setDocSuccess('מעולה! המשימות נוספו מהמסמך! ✅');
-      setDocText(''); setDocFile(null);
-      fetchTasks(); fetchUpcomingTests();
-    } catch {} finally { setDocLoading(false); }
   }
 
   async function scheduleStudy() {
@@ -589,7 +567,7 @@ export default function KidDashboard() {
         <button className="kid-fab kid-fab-chat" onClick={() => setShowChat(true)}>
           <Bot size={22} /><span>צ&apos;אט</span>
         </button>
-        <button className="kid-fab kid-fab-doc" onClick={() => { setDocSuccess(''); setShowDocument(true); }}>
+        <button className="kid-fab kid-fab-doc" onClick={() => setShowChat(true)}>
           <FileText size={22} /><span>מסמך</span>
         </button>
       </div>
@@ -791,41 +769,6 @@ export default function KidDashboard() {
         </div>
       )}
 
-      {/* ── DOCUMENT ── */}
-      {showDocument && (
-        <div className="modal-overlay" onClick={() => setShowDocument(false)}>
-          <div className="modal-card" onClick={e => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowDocument(false)}><X size={20} /></button>
-            <div className="modal-header">
-              <div className="modal-icon modal-icon-doc"><FileText size={28} color="white" /></div>
-              <h2 className="modal-title">הוסף מסמך</h2>
-              <p className="modal-sub">העלה קובץ שיעורים ואני אמצא את המשימות</p>
-            </div>
-            {docSuccess ? (
-              <div className="success-box">{docSuccess}</div>
-            ) : (
-              <>
-                <div className="upload-area" onClick={() => document.getElementById('kid-file-upload')?.click()}>
-                  <Upload size={32} color="var(--color-primary)" />
-                  <p>{docFile ? docFile.name : 'לחץ להעלאת קובץ (PDF, Word, תמונה)'}</p>
-                  <input id="kid-file-upload" type="file" accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
-                    style={{ display: 'none' }} onChange={e => setDocFile(e.target.files?.[0] || null)} />
-                </div>
-                <div className="modal-divider">או</div>
-                <div className="form-field">
-                  <label>הדבק טקסט</label>
-                  <textarea className="form-textarea" value={docText} onChange={e => setDocText(e.target.value)}
-                    placeholder="הדבק כאן שיעורי בית, רשימת משימות..." rows={4} />
-                </div>
-                <button className="btn-primary" onClick={submitDocument}
-                  disabled={docLoading || (!docText.trim() && !docFile)}>
-                  {docLoading ? 'מעבד...' : 'צור משימות מהמסמך'}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
