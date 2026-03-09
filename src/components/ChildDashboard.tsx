@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   ArrowRight, ChevronLeft, ChevronRight,
   Bot, FileText, Star, Bell, UserPlus,
-  CheckCircle2, Circle, Clock, X, Send, Upload,
+  CheckCircle2, Circle, Clock, X, Send, Upload, Paperclip,
 } from 'lucide-react';
 import { API_URL, API_ENDPOINTS } from '@/lib/api';
 
@@ -79,6 +79,8 @@ export default function ChildDashboard({ childId }: { childId: number }) {
   ]);
   const [botInput, setBotInput] = useState('');
   const [botLoading, setBotLoading] = useState(false);
+  const [botFile, setBotFile] = useState<File | null>(null);
+  const botFileRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Action modals shared state
@@ -161,6 +163,26 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     } finally {
       setBotLoading(false);
     }
+  }
+
+  async function sendBotFile() {
+    if (!botFile || botLoading) return;
+    const file = botFile;
+    setBotFile(null);
+    setBotMessages(prev => [...prev, { role: 'user', text: `📎 ${file.name}` }]);
+    setBotLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('child_id', String(childId));
+      await fetch(`${API_URL}${API_ENDPOINTS.TASKS.FROM_DOCUMENT}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${authToken}` }, body: fd,
+      });
+      setBotMessages(prev => [...prev, { role: 'bot', text: 'מעולה! המשימות נוספו מהמסמך! ✅' }]);
+      fetchTasks();
+    } catch {
+      setBotMessages(prev => [...prev, { role: 'bot', text: 'שגיאה בעיבוד הקובץ. נסה שוב.' }]);
+    } finally { setBotLoading(false); }
   }
 
   async function sendCompliment() {
@@ -438,16 +460,29 @@ export default function ChildDashboard({ childId }: { childId: number }) {
                   )}
                   <div ref={chatEndRef} />
                 </div>
+                {botFile && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: 'var(--color-bg)', borderRadius: 8, margin: '0 0 8px 0', fontSize: '0.85rem', color: 'var(--color-primary)' }}>
+                    <Paperclip size={14} />
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{botFile.name}</span>
+                    <button onClick={() => setBotFile(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}><X size={14} /></button>
+                  </div>
+                )}
                 <div className="chat-input-row">
+                  <input ref={botFileRef} type="file" accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg" style={{ display: 'none' }}
+                    onChange={e => { setBotFile(e.target.files?.[0] || null); if (botFileRef.current) botFileRef.current.value = ''; }} />
+                  <button className="chat-send" style={{ background: 'var(--color-bg)', color: 'var(--color-primary)' }}
+                    onClick={() => botFileRef.current?.click()} disabled={botLoading} title="צרף קובץ">
+                    <Paperclip size={18} />
+                  </button>
                   <input
                     type="text"
                     className="chat-input"
                     placeholder="לדוגמה: שיעורי בית במתמטיקה ליום שני..."
                     value={botInput}
                     onChange={e => setBotInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && sendBotMessage()}
+                    onKeyDown={e => e.key === 'Enter' && (botFile ? sendBotFile() : sendBotMessage())}
                   />
-                  <button className="chat-send" onClick={sendBotMessage} disabled={botLoading}>
+                  <button className="chat-send" onClick={botFile ? sendBotFile : sendBotMessage} disabled={botLoading}>
                     <Send size={18} />
                   </button>
                 </div>
