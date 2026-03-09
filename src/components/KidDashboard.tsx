@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   CheckCircle2, Circle, Clock, X, Send, Upload,
   FileText, Bot, ChevronLeft, ChevronRight,
-  Edit3, LogOut, BookOpen, Zap, Play, Pause, Target,
+  Edit3, LogOut, BookOpen, Zap, Play, Pause, Target, Paperclip,
 } from 'lucide-react';
 import { API_URL, API_ENDPOINTS } from '@/lib/api';
 
@@ -175,6 +175,8 @@ export default function KidDashboard() {
   ]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [chatFile, setChatFile] = useState<File | null>(null);
+  const chatFileRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Document
@@ -299,6 +301,25 @@ export default function KidDashboard() {
       if (data.task_created) { fetchTasks(); fetchUpcomingTests(); }
     } catch {
       setChatMessages(prev => [...prev, { role: 'bot', text: 'אירעה שגיאה. נסה שוב.' }]);
+    } finally { setChatLoading(false); }
+  }
+
+  async function sendChatFile() {
+    if (!chatFile || chatLoading) return;
+    const file = chatFile;
+    setChatFile(null);
+    setChatMessages(prev => [...prev, { role: 'user', text: `📎 ${file.name}` }]);
+    setChatLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      await fetch(`${API_URL}${API_ENDPOINTS.TASKS.FROM_DOCUMENT}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${authToken}` }, body: fd,
+      });
+      setChatMessages(prev => [...prev, { role: 'bot', text: 'מעולה! המשימות נוספו מהמסמך! ✅' }]);
+      fetchTasks(); fetchUpcomingTests();
+    } catch {
+      setChatMessages(prev => [...prev, { role: 'bot', text: 'אירעה שגיאה בעיבוד הקובץ.' }]);
     } finally { setChatLoading(false); }
   }
 
@@ -743,12 +764,25 @@ export default function KidDashboard() {
               )}
               <div ref={chatEndRef} />
             </div>
+            {chatFile && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: 'var(--color-bg)', borderRadius: 8, margin: '0 0 8px 0', fontSize: '0.85rem', color: 'var(--color-primary)' }}>
+                <Paperclip size={14} />
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{chatFile.name}</span>
+                <button onClick={() => setChatFile(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}><X size={14} /></button>
+              </div>
+            )}
             <div className="chat-input-row">
+              <input ref={chatFileRef} type="file" accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg" style={{ display: 'none' }}
+                onChange={e => { setChatFile(e.target.files?.[0] || null); if (chatFileRef.current) chatFileRef.current.value = ''; }} />
+              <button className="chat-send" style={{ background: 'var(--color-bg)', color: 'var(--color-primary)' }}
+                onClick={() => chatFileRef.current?.click()} disabled={chatLoading} title="צרף קובץ">
+                <Paperclip size={18} />
+              </button>
               <input type="text" className="chat-input"
                 placeholder="לדוגמה: מבחן במתמטיקה ביום שלישי..."
                 value={chatInput} onChange={e => setChatInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && sendChat()} />
-              <button className="chat-send" onClick={sendChat} disabled={chatLoading}><Send size={18} /></button>
+                onKeyDown={e => e.key === 'Enter' && (chatFile ? sendChatFile() : sendChat())} />
+              <button className="chat-send" onClick={chatFile ? sendChatFile : sendChat} disabled={chatLoading}><Send size={18} /></button>
             </div>
           </div>
         </div>
