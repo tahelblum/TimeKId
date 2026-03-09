@@ -60,12 +60,11 @@
     {
       "parameters": {
         "url": "https://x8ki-letl-twmt.n7.xano.io/api:UgeJ6dlR/Task",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "=Bearer {{ $json.auth_token }}" }
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $json.auth_token }}" },
+            { "name": "Content-Type", "value": "application/json" }
           ]
         },
         "sendBody": true,
