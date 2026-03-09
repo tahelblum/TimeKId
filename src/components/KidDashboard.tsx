@@ -291,10 +291,10 @@ export default function KidDashboard() {
     setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
     setChatLoading(true);
     try {
-      const res = await fetch(`${API_URL}${API_ENDPOINTS.TASKS.BOT}`, {
+      const res = await fetch('https://tahelblum.app.n8n.cloud/webhook/802c3f7e-3fa8-45aa-a6e9-3b187aeafc4e', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg, child_id: child?.id, auth_token: authToken }),
       });
       const data = await res.json();
       setChatMessages(prev => [...prev, { role: 'bot', text: data.reply || 'נוצרה משימה חדשה! ✅' }]);
