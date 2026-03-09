@@ -143,6 +143,8 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     } catch {}
   }
 
+  const N8N_WEBHOOK = 'https://tahelblum.app.n8n.cloud/webhook/kidtime-bot';
+
   async function sendBotMessage() {
     if (!botInput.trim() || botLoading) return;
     const msg = botInput.trim();
@@ -150,10 +152,10 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     setBotMessages(prev => [...prev, { role: 'user', text: msg }]);
     setBotLoading(true);
     try {
-      const res = await fetch(`${API_URL}${API_ENDPOINTS.TASKS.BOT}`, {
+      const res = await fetch(N8N_WEBHOOK, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg, child_id: childId }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg, child_id: childId, auth_token: authToken }),
       });
       const data = await res.json();
       setBotMessages(prev => [...prev, { role: 'bot', text: data.reply || 'המשימה נוצרה בהצלחה!' }]);
@@ -172,13 +174,14 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     setBotMessages(prev => [...prev, { role: 'user', text: `📎 ${file.name}` }]);
     setBotLoading(true);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('child_id', String(childId));
-      await fetch(`${API_URL}${API_ENDPOINTS.TASKS.FROM_DOCUMENT}`, {
-        method: 'POST', headers: { Authorization: `Bearer ${authToken}` }, body: fd,
+      const text = await file.text();
+      const res = await fetch(N8N_WEBHOOK, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_content: text, child_id: childId, auth_token: authToken }),
       });
-      setBotMessages(prev => [...prev, { role: 'bot', text: 'מעולה! המשימות נוספו מהמסמך! ✅' }]);
+      const data = await res.json();
+      setBotMessages(prev => [...prev, { role: 'bot', text: data.reply || 'מעולה! המשימות נוספו מהמסמך! ✅' }]);
       fetchTasks();
     } catch {
       setBotMessages(prev => [...prev, { role: 'bot', text: 'שגיאה בעיבוד הקובץ. נסה שוב.' }]);

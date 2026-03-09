@@ -291,7 +291,7 @@ export default function KidDashboard() {
     setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
     setChatLoading(true);
     try {
-      const res = await fetch('https://tahelblum.app.n8n.cloud/webhook/802c3f7e-3fa8-45aa-a6e9-3b187aeafc4e', {
+      const res = await fetch('https://tahelblum.app.n8n.cloud/webhook/kidtime-bot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: msg, child_id: child?.id, auth_token: authToken }),
@@ -311,12 +311,14 @@ export default function KidDashboard() {
     setChatMessages(prev => [...prev, { role: 'user', text: `📎 ${file.name}` }]);
     setChatLoading(true);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      await fetch(`${API_URL}${API_ENDPOINTS.TASKS.FROM_DOCUMENT}`, {
-        method: 'POST', headers: { Authorization: `Bearer ${authToken}` }, body: fd,
+      const text = await file.text();
+      const res = await fetch('https://tahelblum.app.n8n.cloud/webhook/kidtime-bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_content: text, child_id: child?.id, auth_token: authToken }),
       });
-      setChatMessages(prev => [...prev, { role: 'bot', text: 'מעולה! המשימות נוספו מהמסמך! ✅' }]);
+      const data = await res.json();
+      setChatMessages(prev => [...prev, { role: 'bot', text: data.reply || 'מעולה! המשימות נוספו מהמסמך! ✅' }]);
       fetchTasks(); fetchUpcomingTests();
     } catch {
       setChatMessages(prev => [...prev, { role: 'bot', text: 'אירעה שגיאה בעיבוד הקובץ.' }]);
