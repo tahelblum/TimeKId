@@ -1,4 +1,14 @@
 'use client';
+const extractArray = (d: unknown) => {
+  if (Array.isArray(d)) return d;
+  if (d && typeof d === 'object') {
+    const obj = d as Record<string, unknown>;
+    if (Array.isArray(obj.items)) return obj.items;
+    if (Array.isArray(obj.value)) return obj.value;
+    if (Array.isArray(obj.result)) return obj.result;
+  }
+  return [];
+};
 import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
@@ -122,7 +132,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
       const end = view === 'week' ? weekDays[6] : currentDate;
       const url = `${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}?start=${formatDateForAPI(start)}&end=${formatDateForAPI(end)}`;
       const res = await fetch(url, { headers: { 'Authorization': `Bearer ${authToken}` } });
-      if (res.ok) { const d = await res.json(); setTasks(Array.isArray(d) ? d : (d.items ?? [])); }
+      if (res.ok) { setTasks(extractArray(await res.json())); }
       else setTasks([]);
     } catch {
       setTasks([]);

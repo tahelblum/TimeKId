@@ -10,6 +10,18 @@ import {
 } from 'lucide-react';
 import { API_URL, API_ENDPOINTS } from '@/lib/api';
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const extractArray = (d: unknown): Task[] => {
+  if (Array.isArray(d)) return d;
+  if (d && typeof d === 'object') {
+    const obj = d as Record<string, unknown>;
+    if (Array.isArray(obj.items)) return obj.items as Task[];
+    if (Array.isArray(obj.value)) return obj.value as Task[];
+    if (Array.isArray(obj.result)) return obj.result as Task[];
+  }
+  return [];
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Task {
   id: number;
@@ -189,7 +201,7 @@ export default function KidDashboard() {
       const end = view === 'week' ? days[6] : currentDate;
       const url = `${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${toAPIDate(start)}&end=${toAPIDate(end)}`;
       const res = await fetch(url, { headers: { Authorization: `Bearer ${authToken}` } });
-      if (res.ok) { const d = await res.json(); setTasks(Array.isArray(d) ? d : (d.items ?? [])); } else setTasks([]);
+      if (res.ok) { const d = await res.json(); setTasks(extractArray(d)); } else setTasks([]);
     } catch { setTasks([]); } finally { setTasksLoading(false); }
   }, [currentDate, view, authToken]);
 
@@ -198,7 +210,7 @@ export default function KidDashboard() {
     const url = `${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${toAPIDate(days[0])}&end=${toAPIDate(days[6])}`;
     try {
       const res = await fetch(url, { headers: { Authorization: `Bearer ${authToken}` } });
-      if (res.ok) { const d = await res.json(); setWeekAllTasks(Array.isArray(d) ? d : (d.items ?? [])); }
+      if (res.ok) { const d = await res.json(); setWeekAllTasks(extractArray(d)); }
     } catch {}
   }, [currentDate, authToken]);
 
@@ -209,7 +221,7 @@ export default function KidDashboard() {
       const url = `${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${toAPIDate(today)}&end=${toAPIDate(future)}`;
       const res = await fetch(url, { headers: { Authorization: `Bearer ${authToken}` } });
       if (res.ok) {
-        const raw = await res.json(); const all: Task[] = Array.isArray(raw) ? raw : (raw.items ?? []);
+        const all: Task[] = extractArray(await res.json());
         setUpcomingTests(all.filter(t => isTest(t) && t.status !== 'done' && daysUntil(t.due_date) >= 0));
       }
     } catch {}
