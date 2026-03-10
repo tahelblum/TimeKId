@@ -1119,6 +1119,7 @@ body {
 .ev-title.done { text-decoration: line-through; color: var(--color-text-muted); }
 .ev-edit  { background: none; border: none; cursor: pointer; padding: 1px; color: var(--color-text-muted); opacity: 0.5; flex-shrink: 0; }
 .ev-edit:hover { opacity: 1; color: var(--color-primary); }
+.ev-time { font-size: 0.62rem; color: var(--color-text-muted); font-weight: 600; direction: ltr; }
 
 /* "Now" red indicator line */
 .sc-now-line {

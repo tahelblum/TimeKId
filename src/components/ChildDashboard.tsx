@@ -1,21 +1,24 @@
 'use client';
-const extractArray = (d: unknown) => {
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const extractArray = (d: unknown): Task[] => {
   if (Array.isArray(d)) return d;
   if (d && typeof d === 'object') {
     const obj = d as Record<string, unknown>;
-    if (Array.isArray(obj.items)) return obj.items;
-    if (Array.isArray(obj.value)) return obj.value;
-    if (Array.isArray(obj.result)) return obj.result;
+    if (Array.isArray(obj.items)) return obj.items as Task[];
+    if (Array.isArray(obj.value)) return obj.value as Task[];
+    if (Array.isArray(obj.result)) return obj.result as Task[];
   }
   return [];
 };
+
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import {
-  ArrowRight, ChevronLeft, ChevronRight,
+  ArrowRight, ChevronLeft, ChevronRight, Edit3,
   Bot, FileText, Star, Bell, UserPlus,
-  CheckCircle2, Circle, Clock, X, Send, Upload, Paperclip,
+  X, Send, Upload, Paperclip,
 } from 'lucide-react';
 import { API_URL, API_ENDPOINTS } from '@/lib/api';
 
@@ -25,65 +28,66 @@ interface Task {
   description: string;
   due_date: number;
   status: 'pending' | 'in_progress' | 'done';
-  type: 'homework' | 'activity' | 'other';
+  type: 'homework' | 'test' | 'activity' | 'other' | 'school';
 }
+interface Child { id: number; name: string; username: string; grade: string; }
+interface ChatMessage { role: 'user' | 'bot'; text: string; }
 
-interface Child {
-  id: number;
-  name: string;
-  username: string;
-  grade: string;
-}
-
-interface ChatMessage {
-  role: 'user' | 'bot';
-  text: string;
-}
-
-const HEBREW_DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+const HEBREW_DAYS   = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 const HEBREW_MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+const GRID_HOURS    = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
+const ROW_HEIGHT    = 56;
+const CACHE_TTL     = 5 * 60 * 1000;
 
-function getWeekStart(date: Date): Date {
-  const d = new Date(date);
-  d.setDate(d.getDate() - d.getDay());
-  d.setHours(0, 0, 0, 0);
-  return d;
+function weekStart(d: Date): Date {
+  const r = new Date(d); r.setDate(r.getDate() - r.getDay()); r.setHours(0, 0, 0, 0); return r;
+}
+function weekDays(d: Date): Date[] {
+  const s = weekStart(d);
+  return Array.from({ length: 7 }, (_, i) => { const x = new Date(s); x.setDate(x.getDate() + i); return x; });
+}
+function sameDay(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+function toAPIDate(d: Date) { return d.toISOString().split('T')[0]; }
+function getTaskHour(ts: number): number { return new Date(ts * 1000).getHours(); }
+function getTaskTimeLabel(ts: number): string {
+  const d = new Date(ts * 1000);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+function tsFromDateAndHour(dateStr: string, hour: number): number {
+  return Math.floor(new Date(`${dateStr}T${String(hour).padStart(2, '0')}:00:00`).getTime() / 1000);
+}
+function dayStrOf(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function getWeekDays(date: Date): Date[] {
-  const start = getWeekStart(date);
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(start);
-    d.setDate(d.getDate() + i);
-    return d;
-  });
+function urgencyKey(ts: number, status: Task['status']): 'done' | 'overdue' | 'today' | 'tomorrow' | 'soon' | 'later' {
+  if (status === 'done') return 'done';
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  const due = new Date(ts * 1000); due.setHours(0, 0, 0, 0);
+  const d = Math.round((due.getTime() - now.getTime()) / 86400000);
+  if (d < 0) return 'overdue';
+  if (d === 0) return 'today';
+  if (d === 1) return 'tomorrow';
+  if (d <= 3) return 'soon';
+  return 'later';
 }
 
-function sameDay(a: Date, b: Date): boolean {
-  return a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate();
-}
-
-function formatDateForAPI(date: Date): string {
-  return date.toISOString().split('T')[0];
-}
-
-const CACHE_TTL = 5 * 60 * 1000;
+const TYPE_EMOJI: Record<Task['type'], string> = { homework: '📚', test: '📝', activity: '🎨', school: '🏫', other: '✏️' };
 
 export default function ChildDashboard({ childId }: { childId: number }) {
   const { authToken } = useAuth();
   const router = useRouter();
+
   const [child, setChild] = useState<Child | null>(null);
   const [weekAllTasks, setWeekAllTasks] = useState<Task[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
   const [view, setView] = useState<'day' | 'week'>('day');
-  const [currentDate, setCurrentDate] = useState(() => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
-  });
+  const [currentDate, setCurrentDate] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; });
   const cacheRef = useRef<{ weekKey: string; fetchedAt: number } | null>(null);
+  const calBodyRef = useRef<HTMLDivElement>(null);
+
   const [activeModal, setActiveModal] = useState<null | 'bot' | 'document' | 'compliment' | 'reminder' | 'secondary'>(null);
 
   // Bot
@@ -96,59 +100,58 @@ export default function ChildDashboard({ childId }: { childId: number }) {
   const botFileRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Action modals shared state
+  // Modals
   const [actionLoading, setActionLoading] = useState(false);
   const [actionSuccess, setActionSuccess] = useState('');
-
-  // Compliment
   const [complimentText, setComplimentText] = useState('');
-
-  // Reminder
   const [reminderText, setReminderText] = useState('');
   const [reminderDate, setReminderDate] = useState('');
-
-  // Secondary parent
   const [secondaryEmail, setSecondaryEmail] = useState('');
-
-  // Document
   const [documentText, setDocumentText] = useState('');
   const [documentFile, setDocumentFile] = useState<File | null>(null);
 
-  useEffect(() => { fetchChild(); }, [childId]);
-  useEffect(() => { fetchWeekData(); }, [childId, currentDate]);
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [botMessages]);
+  // Drag
+  const [dragOverCell, setDragOverCell] = useState<{ di: number; hour: number } | null>(null);
+  const dragTaskId = useRef<number | null>(null);
 
-  async function fetchChild() {
-    try {
-      const res = await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.GET(childId)}`, {
-        headers: { 'Authorization': `Bearer ${authToken}` },
-      });
-      if (res.ok) setChild(await res.json());
-    } catch {}
-  }
+  const wDays = weekDays(currentDate);
+  const today = new Date();
 
+  // ─── Data fetching ────────────────────────────────────────────────────────
   const fetchWeekData = useCallback(async (force = false) => {
-    const days = getWeekDays(currentDate);
-    const key = formatDateForAPI(days[0]);
+    const days = weekDays(currentDate);
+    const key = toAPIDate(days[0]);
     const now = Date.now();
     if (!force && cacheRef.current?.weekKey === key && now - cacheRef.current.fetchedAt < CACHE_TTL) return;
     setTasksLoading(true);
     try {
-      const url = `${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}?start=${formatDateForAPI(days[0])}&end=${formatDateForAPI(days[6])}`;
+      const url = `${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}?start=${toAPIDate(days[0])}&end=${toAPIDate(days[6])}`;
       const res = await fetch(url, { headers: { 'Authorization': `Bearer ${authToken}` } });
       if (res.ok) {
         setWeekAllTasks(extractArray(await res.json()));
         cacheRef.current = { weekKey: key, fetchedAt: now };
-      } else {
-        setWeekAllTasks([]);
-      }
-    } catch {
-      setWeekAllTasks([]);
-    } finally {
-      setTasksLoading(false);
-    }
+      } else { setWeekAllTasks([]); }
+    } catch { setWeekAllTasks([]); } finally { setTasksLoading(false); }
   }, [currentDate, childId, authToken]);
 
+  useEffect(() => { fetchWeekData(); }, [fetchWeekData]);
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [botMessages]);
+  useEffect(() => {
+    if (calBodyRef.current) {
+      const nowIdx = GRID_HOURS.indexOf(new Date().getHours());
+      calBodyRef.current.scrollTop = Math.max(0, (nowIdx - 1) * ROW_HEIGHT);
+    }
+  }, [view]);
+
+  async function fetchChild() {
+    try {
+      const res = await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.GET(childId)}`, { headers: { 'Authorization': `Bearer ${authToken}` } });
+      if (res.ok) setChild(await res.json());
+    } catch {}
+  }
+  useEffect(() => { fetchChild(); }, [childId]);
+
+  // ─── Actions ──────────────────────────────────────────────────────────────
   async function toggleTaskStatus(task: Task) {
     const next: Task['status'] = task.status === 'pending' ? 'in_progress' : task.status === 'in_progress' ? 'done' : 'pending';
     setWeekAllTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: next } : t));
@@ -161,105 +164,78 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     } catch {}
   }
 
+  async function moveTaskToDayHour(taskId: number, targetDay: Date, hour: number) {
+    const task = weekAllTasks.find(t => t.id === taskId);
+    if (!task) return;
+    const mins = new Date(task.due_date * 1000).getMinutes();
+    const newTs = tsFromDateAndHour(dayStrOf(targetDay), hour) + mins * 60;
+    setWeekAllTasks(prev => prev.map(t => t.id === taskId ? { ...t, due_date: newTs } : t));
+    try {
+      await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.UPDATE_TASK(childId, taskId)}`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ due_date: newTs }),
+      });
+    } catch {}
+  }
+
   const N8N_WEBHOOK = 'https://tahelblum.app.n8n.cloud/webhook/kidtime-bot';
 
   async function sendBotMessage() {
     if (!botInput.trim() || botLoading) return;
-    const msg = botInput.trim();
-    setBotInput('');
+    const msg = botInput.trim(); setBotInput('');
     setBotMessages(prev => [...prev, { role: 'user', text: msg }]);
     setBotLoading(true);
     try {
-      const res = await fetch(N8N_WEBHOOK, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg, child_id: childId, auth_token: authToken }),
-      });
+      const res = await fetch(N8N_WEBHOOK, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg, child_id: childId, auth_token: authToken }) });
       const data = await res.json();
       setBotMessages(prev => [...prev, { role: 'bot', text: data.reply || 'המשימה נוצרה בהצלחה!' }]);
       if (data.task_created) fetchWeekData(true);
-    } catch {
-      setBotMessages(prev => [...prev, { role: 'bot', text: 'מצטער, אירעה שגיאה. נסה שוב.' }]);
-    } finally {
-      setBotLoading(false);
-    }
+    } catch { setBotMessages(prev => [...prev, { role: 'bot', text: 'מצטער, אירעה שגיאה. נסה שוב.' }]); }
+    finally { setBotLoading(false); }
   }
 
   async function sendBotFile() {
     if (!botFile || botLoading) return;
-    const file = botFile;
-    setBotFile(null);
+    const file = botFile; setBotFile(null);
     setBotMessages(prev => [...prev, { role: 'user', text: `📎 ${file.name}` }]);
     setBotLoading(true);
     try {
       const text = (await file.text()).substring(0, 8000);
-      const res = await fetch(N8N_WEBHOOK, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_content: text, child_id: childId, auth_token: authToken }),
-      });
+      const res = await fetch(N8N_WEBHOOK, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file_content: text, child_id: childId, auth_token: authToken }) });
       const raw = await res.text();
       const data = raw ? JSON.parse(raw) : {};
       setBotMessages(prev => [...prev, { role: 'bot', text: data.reply || 'מעולה! המשימות נוספו מהמסמך! ✅' }]);
       fetchWeekData(true);
-    } catch (e) {
-      setBotMessages(prev => [...prev, { role: 'bot', text: 'שגיאה בעיבוד הקובץ. נסה שוב.' }]);
-    } finally { setBotLoading(false); }
+    } catch { setBotMessages(prev => [...prev, { role: 'bot', text: 'שגיאה בעיבוד הקובץ. נסה שוב.' }]); }
+    finally { setBotLoading(false); }
   }
 
   async function sendCompliment() {
     if (!complimentText.trim()) return;
     setActionLoading(true);
     try {
-      await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.COMPLIMENT(childId)}`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: complimentText }),
-      });
-      setActionSuccess('המחמאה נשלחה לילד!');
-      setComplimentText('');
-    } catch {
-      setActionSuccess('');
-    } finally {
-      setActionLoading(false);
-    }
+      await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.COMPLIMENT(childId)}`, { method: 'POST', headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: complimentText }) });
+      setActionSuccess('המחמאה נשלחה לילד!'); setComplimentText('');
+    } catch { setActionSuccess(''); } finally { setActionLoading(false); }
   }
 
   async function sendReminder() {
     if (!reminderText.trim()) return;
     setActionLoading(true);
     try {
-      await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.REMINDER(childId)}`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: reminderText, scheduled_at: reminderDate }),
-      });
-      setActionSuccess('התזכורת נשלחה בהצלחה!');
-      setReminderText('');
-      setReminderDate('');
-    } catch {
-      setActionSuccess('');
-    } finally {
-      setActionLoading(false);
-    }
+      await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.REMINDER(childId)}`, { method: 'POST', headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: reminderText, scheduled_at: reminderDate }) });
+      setActionSuccess('התזכורת נשלחה בהצלחה!'); setReminderText(''); setReminderDate('');
+    } catch { setActionSuccess(''); } finally { setActionLoading(false); }
   }
 
   async function addSecondaryParent() {
     if (!secondaryEmail.trim()) return;
     setActionLoading(true);
     try {
-      await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.SECONDARY_PARENT(childId)}`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: secondaryEmail }),
-      });
-      setActionSuccess('הזמנה נשלחה להורה השני!');
-      setSecondaryEmail('');
-    } catch {
-      setActionSuccess('');
-    } finally {
-      setActionLoading(false);
-    }
+      await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.SECONDARY_PARENT(childId)}`, { method: 'POST', headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ email: secondaryEmail }) });
+      setActionSuccess('הזמנה נשלחה להורה השני!'); setSecondaryEmail('');
+    } catch { setActionSuccess(''); } finally { setActionLoading(false); }
   }
 
   async function submitDocument() {
@@ -270,79 +246,26 @@ export default function ChildDashboard({ childId }: { childId: number }) {
       formData.append('child_id', String(childId));
       if (documentFile) formData.append('file', documentFile);
       if (documentText) formData.append('text', documentText);
-      await fetch(`${API_URL}${API_ENDPOINTS.TASKS.FROM_DOCUMENT}`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${authToken}` },
-        body: formData,
-      });
-      setActionSuccess('המסמך נטען ומשימות נוצרו בהצלחה!');
-      setDocumentText('');
-      setDocumentFile(null);
+      await fetch(`${API_URL}${API_ENDPOINTS.TASKS.FROM_DOCUMENT}`, { method: 'POST', headers: { 'Authorization': `Bearer ${authToken}` }, body: formData });
+      setActionSuccess('המסמך נטען ומשימות נוצרו בהצלחה!'); setDocumentText(''); setDocumentFile(null);
       fetchWeekData(true);
-    } catch {
-      setActionSuccess('');
-    } finally {
-      setActionLoading(false);
-    }
+    } catch { setActionSuccess(''); } finally { setActionLoading(false); }
   }
 
-  function closeModal() {
-    setActiveModal(null);
-    setActionSuccess('');
-    setActionLoading(false);
-  }
+  function closeModal() { setActiveModal(null); setActionSuccess(''); setActionLoading(false); }
 
-  function navigatePrev() {
-    setCurrentDate(prev => {
-      const d = new Date(prev);
-      d.setDate(d.getDate() - (view === 'week' ? 7 : 1));
-      return d;
-    });
-  }
-
-  function navigateNext() {
-    setCurrentDate(prev => {
-      const d = new Date(prev);
-      d.setDate(d.getDate() + (view === 'week' ? 7 : 1));
-      return d;
-    });
-  }
-
-  function goToToday() {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    setCurrentDate(d);
-  }
-
-  const weekDays = getWeekDays(currentDate);
-  const today = new Date();
-
-  const visibleTasks = view === 'day'
-    ? weekAllTasks.filter(t => sameDay(new Date(t.due_date * 1000), currentDate))
-    : weekAllTasks;
+  const navDate = (delta: number) => setCurrentDate(prev => { const d = new Date(prev); d.setDate(d.getDate() + delta); return d; });
 
   const dateLabel = view === 'day'
-    ? `${HEBREW_DAY_NAMES[currentDate.getDay()]}, ${currentDate.getDate()} ${HEBREW_MONTHS[currentDate.getMonth()]} ${currentDate.getFullYear()}`
-    : `${weekDays[0].getDate()}–${weekDays[6].getDate()} ${HEBREW_MONTHS[weekDays[6].getMonth()]} ${weekDays[6].getFullYear()}`;
+    ? `${HEBREW_DAYS[currentDate.getDay()]}, ${currentDate.getDate()} ${HEBREW_MONTHS[currentDate.getMonth()]}`
+    : `${wDays[0].getDate()}–${wDays[6].getDate()} ${HEBREW_MONTHS[wDays[6].getMonth()]}`;
 
-  const statusIcon = (status: Task['status']) => {
-    if (status === 'done') return <CheckCircle2 size={22} color="var(--color-success)" />;
-    if (status === 'in_progress') return <Clock size={22} color="var(--color-secondary)" />;
-    return <Circle size={22} color="var(--color-text-muted)" />;
-  };
-
-  const statusLabel = (status: Task['status']) => {
-    if (status === 'done') return 'הושלם';
-    if (status === 'in_progress') return 'בתהליך';
-    return 'ממתין';
-  };
-
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="dashboard">
       <header className="dashboard-header">
         <button className="btn-back" onClick={() => router.push('/dashboard')}>
-          <ArrowRight size={20} />
-          חזרה
+          <ArrowRight size={20} />חזרה
         </button>
         {child && (
           <div className="child-header-info">
@@ -354,108 +277,158 @@ export default function ChildDashboard({ childId }: { childId: number }) {
           </div>
         )}
         <button className="btn-secondary" onClick={() => { setActionSuccess(''); setActiveModal('secondary'); }}>
-          <UserPlus size={18} />
-          הורה שני
+          <UserPlus size={18} />הורה שני
         </button>
       </header>
 
       <main className="dashboard-main" style={{ paddingBottom: 120 }}>
-        {/* View toggle + calendar nav */}
+
+        {/* ── CALENDAR CONTROLS ── */}
         <div className="calendar-controls">
           <div className="view-toggle">
             <button className={`view-btn${view === 'day' ? ' active' : ''}`} onClick={() => setView('day')}>יום</button>
             <button className={`view-btn${view === 'week' ? ' active' : ''}`} onClick={() => setView('week')}>שבוע</button>
           </div>
-          <div className="calendar-nav">
-            <button className="nav-arrow" onClick={navigatePrev}><ChevronRight size={20} /></button>
+          <div className="kid-cal-nav">
+            <button className="nav-arrow" onClick={() => navDate(view === 'week' ? -7 : -1)}><ChevronRight size={18} /></button>
             <span className="calendar-date-label">{dateLabel}</span>
-            <button className="nav-arrow" onClick={navigateNext}><ChevronLeft size={20} /></button>
+            <button className="nav-arrow" onClick={() => navDate(view === 'week' ? 7 : 1)}><ChevronLeft size={18} /></button>
           </div>
-          <button className="btn-today" onClick={goToToday}>היום</button>
+          <button className="btn-today" onClick={() => { const d = new Date(); d.setHours(0, 0, 0, 0); setCurrentDate(d); }}>היום</button>
         </div>
 
-        {/* Week strip */}
-        {view === 'week' && (
-          <div className="week-strip">
-            {weekDays.map((day, i) => {
-              const dayTaskCount = weekAllTasks.filter(t => sameDay(new Date(t.due_date * 1000), day)).length;
-              const isToday = sameDay(day, today);
-              return (
-                <div
-                  key={i}
-                  className={`week-day${isToday ? ' today' : ''}`}
-                  onClick={() => { setCurrentDate(day); setView('day'); }}
-                >
-                  <div className="week-day-name">{HEBREW_DAY_NAMES[day.getDay()]}</div>
-                  <div className="week-day-num">{day.getDate()}</div>
-                  {dayTaskCount > 0 && <div className="week-day-dot">{dayTaskCount}</div>}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Tasks */}
-        <div className="tasks-section">
-          <div className="tasks-header">
-            <h2 className="tasks-title">משימות</h2>
-            <span className="tasks-count">{visibleTasks.length} משימות</span>
-          </div>
-          {tasksLoading ? (
-            <div className="tasks-loading"><div className="spinner" /></div>
-          ) : visibleTasks.length === 0 ? (
-            <div className="empty-state" style={{ padding: '48px 24px' }}>
-              <div className="empty-icon"><CheckCircle2 size={40} color="var(--color-primary)" /></div>
-              <h3 className="empty-title">אין משימות</h3>
-              <p className="empty-sub">אין משימות לתקופה זו. השתמש בבוט כדי להוסיף!</p>
+        {/* ── SMART CALENDAR ── */}
+        {tasksLoading ? (
+          <div className="tasks-loading"><div className="spinner" /></div>
+        ) : (
+          <div className="smart-cal-outer">
+            {/* Column headers */}
+            <div className="smart-cal-head">
+              <div className="sc-corner" />
+              {(view === 'day' ? [currentDate] : wDays).map((day, i) => {
+                const isToday = sameDay(day, today);
+                const dayDone  = weekAllTasks.filter(t => sameDay(new Date(t.due_date * 1000), day) && t.status === 'done').length;
+                const dayTotal = weekAllTasks.filter(t => sameDay(new Date(t.due_date * 1000), day)).length;
+                return (
+                  <div key={i} className={`sc-day-head${isToday ? ' sc-today-head' : ''}`}
+                    onClick={() => { setCurrentDate(day); if (view === 'week') setView('day'); }}>
+                    <span className="sc-day-name">{HEBREW_DAYS[day.getDay()]}</span>
+                    <span className={`sc-day-num${isToday ? ' sc-today-num' : ''}`}>{day.getDate()}</span>
+                    {dayTotal > 0 && <span className="sc-day-prog">{dayDone}/{dayTotal}</span>}
+                  </div>
+                );
+              })}
             </div>
-          ) : (
-            <div className="tasks-list">
-              {visibleTasks.map(task => (
-                <div
-                  key={task.id}
-                  className={`task-item task-${task.status}`}
-                  onClick={() => toggleTaskStatus(task)}
-                >
-                  <div className="task-status-icon">{statusIcon(task.status)}</div>
-                  <div className="task-content">
-                    <div className="task-title">{task.title}</div>
-                    {task.description && <div className="task-desc">{task.description}</div>}
-                    <div className="task-due">
-                      {new Date(task.due_date * 1000).toLocaleDateString('he-IL', {
-                        weekday: 'short', day: 'numeric', month: 'short',
+
+            {/* Time grid body */}
+            <div className="smart-cal-body" ref={calBodyRef}>
+              {/* Now line */}
+              {(() => {
+                const now = new Date();
+                const nowIdx = GRID_HOURS.indexOf(now.getHours());
+                const showNow = view === 'day' ? sameDay(currentDate, today) : wDays.some(d => sameDay(d, today));
+                if (!showNow || nowIdx < 0) return null;
+                const top = nowIdx * ROW_HEIGHT + (now.getMinutes() / 60) * ROW_HEIGHT;
+                return <div className="sc-now-line" style={{ top }} />;
+              })()}
+
+              {GRID_HOURS.map(hour => {
+                const calDays = view === 'day' ? [currentDate] : wDays;
+                return (
+                  <div key={hour} className="sc-row">
+                    <div className="sc-time-label">{String(hour).padStart(2, '0')}:00</div>
+                    {calDays.map((day, di) => {
+                      const isToday = sameDay(day, today);
+                      const cellTasks = weekAllTasks
+                        .filter(t => sameDay(new Date(t.due_date * 1000), day) && getTaskHour(t.due_date) === hour)
+                        .sort((a, b) => a.due_date - b.due_date);
+                      const isDragOver = dragOverCell?.di === di && dragOverCell?.hour === hour;
+                      return (
+                        <div key={di}
+                          className={`sc-cell${isToday ? ' sc-today-col' : ''}${isDragOver ? ' sc-drag-over' : ''}`}
+                          onDragOver={e => { e.preventDefault(); setDragOverCell({ di, hour }); }}
+                          onDragLeave={() => setDragOverCell(null)}
+                          onDrop={e => { e.preventDefault(); setDragOverCell(null); if (dragTaskId.current !== null) moveTaskToDayHour(dragTaskId.current, day, hour); }}>
+                          {cellTasks.map(task => {
+                            const uk = urgencyKey(task.due_date, task.status);
+                            return (
+                              <div key={task.id}
+                                draggable
+                                onDragStart={e => { e.dataTransfer.setData('text/plain', String(task.id)); dragTaskId.current = task.id; }}
+                                onDragEnd={() => { dragTaskId.current = null; setDragOverCell(null); }}
+                                className={`sc-event ev-${task.type} urgency-${uk}${task.status === 'done' ? ' ev-done' : ''}`}
+                                onClick={e => { e.stopPropagation(); toggleTaskStatus(task); }}>
+                                <span className="ev-emoji">{TYPE_EMOJI[task.type] ?? '✏️'}</span>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <span className={`ev-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
+                                  <div className="ev-time">{getTaskTimeLabel(task.due_date)}</div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+
+              {/* Tasks outside grid hours */}
+              {(() => {
+                const calDays = view === 'day' ? [currentDate] : wDays;
+                const out = weekAllTasks.filter(t =>
+                  calDays.some(d => sameDay(new Date(t.due_date * 1000), d)) &&
+                  !GRID_HOURS.includes(getTaskHour(t.due_date))
+                );
+                if (!out.length) return null;
+                return (
+                  <div className="sc-row sc-allday-row">
+                    <div className="sc-time-label">📌</div>
+                    <div className="sc-allday-tasks">
+                      {out.map(task => {
+                        const uk = urgencyKey(task.due_date, task.status);
+                        return (
+                          <div key={task.id}
+                            className={`sc-event ev-${task.type} urgency-${uk}${task.status === 'done' ? ' ev-done' : ''}`}
+                            onClick={() => toggleTaskStatus(task)}>
+                            <span className="ev-emoji">{TYPE_EMOJI[task.type] ?? '✏️'}</span>
+                            <span className={`ev-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
+                          </div>
+                        );
                       })}
                     </div>
                   </div>
-                  <div className={`task-badge task-badge-${task.status}`}>{statusLabel(task.status)}</div>
+                );
+              })()}
+
+              {weekAllTasks.filter(t => view === 'day' ? sameDay(new Date(t.due_date * 1000), currentDate) : true).length === 0 && (
+                <div className="sc-empty">
+                  <div style={{ fontSize: '2rem' }}>✅</div>
+                  <div style={{ fontWeight: 700 }}>אין משימות לתקופה זו</div>
                 </div>
-              ))}
+              )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </main>
 
-      {/* FAB action bar */}
+      {/* ── FAB action bar ── */}
       <div className="fab-panel">
         <button className="fab-btn fab-bot" onClick={() => { setActionSuccess(''); setActiveModal('bot'); }}>
-          <Bot size={22} />
-          <span>בוט</span>
+          <Bot size={22} /><span>בוט</span>
         </button>
         <button className="fab-btn fab-doc" onClick={() => { setActionSuccess(''); setActiveModal('document'); }}>
-          <FileText size={22} />
-          <span>מסמך</span>
+          <FileText size={22} /><span>מסמך</span>
         </button>
         <button className="fab-btn fab-star" onClick={() => { setActionSuccess(''); setActiveModal('compliment'); }}>
-          <Star size={22} />
-          <span>מחמאה</span>
+          <Star size={22} /><span>מחמאה</span>
         </button>
         <button className="fab-btn fab-bell" onClick={() => { setActionSuccess(''); setActiveModal('reminder'); }}>
-          <Bell size={22} />
-          <span>תזכורת</span>
+          <Bell size={22} /><span>תזכורת</span>
         </button>
       </div>
 
-      {/* Modals */}
+      {/* ── Modals ── */}
       {activeModal && (
         <div className="modal-overlay" onClick={closeModal}>
           <div className="modal-card" onClick={e => e.stopPropagation()}>
@@ -471,15 +444,9 @@ export default function ChildDashboard({ childId }: { childId: number }) {
                 </div>
                 <div className="chat-window">
                   {botMessages.map((msg, i) => (
-                    <div key={i} className={`chat-bubble chat-bubble-${msg.role}`}>
-                      <span>{msg.text}</span>
-                    </div>
+                    <div key={i} className={`chat-bubble chat-bubble-${msg.role}`}><span>{msg.text}</span></div>
                   ))}
-                  {botLoading && (
-                    <div className="chat-bubble chat-bubble-bot">
-                      <span className="typing-dots"><span>.</span><span>.</span><span>.</span></span>
-                    </div>
-                  )}
+                  {botLoading && <div className="chat-bubble chat-bubble-bot"><span className="typing-dots"><span>.</span><span>.</span><span>.</span></span></div>}
                   <div ref={chatEndRef} />
                 </div>
                 {botFile && (
@@ -496,17 +463,10 @@ export default function ChildDashboard({ childId }: { childId: number }) {
                     onClick={() => botFileRef.current?.click()} disabled={botLoading} title="צרף קובץ">
                     <Paperclip size={18} />
                   </button>
-                  <input
-                    type="text"
-                    className="chat-input"
-                    placeholder="לדוגמה: שיעורי בית במתמטיקה ליום שני..."
-                    value={botInput}
-                    onChange={e => setBotInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && (botFile ? sendBotFile() : sendBotMessage())}
-                  />
-                  <button className="chat-send" onClick={botFile ? sendBotFile : sendBotMessage} disabled={botLoading}>
-                    <Send size={18} />
-                  </button>
+                  <input type="text" className="chat-input" placeholder="לדוגמה: שיעורי בית במתמטיקה ליום שני..."
+                    value={botInput} onChange={e => setBotInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && (botFile ? sendBotFile() : sendBotMessage())} />
+                  <button className="chat-send" onClick={botFile ? sendBotFile : sendBotMessage} disabled={botLoading}><Send size={18} /></button>
                 </div>
               </>
             )}
@@ -519,37 +479,19 @@ export default function ChildDashboard({ childId }: { childId: number }) {
                   <h2 className="modal-title">טעינת מסמך</h2>
                   <p className="modal-sub">העלו קובץ או הדביקו טקסט לייצור משימות</p>
                 </div>
-                {actionSuccess ? (
-                  <div className="success-box">{actionSuccess}</div>
-                ) : (
+                {actionSuccess ? <div className="success-box">{actionSuccess}</div> : (
                   <>
-                    <div className="upload-area" onClick={() => document.getElementById('file-upload')?.click()}>
+                    <div className="upload-area" onClick={() => document.getElementById('file-upload-cd')?.click()}>
                       <Upload size={32} color="var(--color-primary)" />
                       <p>{documentFile ? documentFile.name : 'לחץ להעלאת קובץ (PDF, Word, תמונה)'}</p>
-                      <input
-                        id="file-upload"
-                        type="file"
-                        accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
-                        style={{ display: 'none' }}
-                        onChange={e => setDocumentFile(e.target.files?.[0] || null)}
-                      />
+                      <input id="file-upload-cd" type="file" accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg" style={{ display: 'none' }} onChange={e => setDocumentFile(e.target.files?.[0] || null)} />
                     </div>
                     <div className="modal-divider">או</div>
                     <div className="form-field">
                       <label>הדבק טקסט</label>
-                      <textarea
-                        className="form-textarea"
-                        value={documentText}
-                        onChange={e => setDocumentText(e.target.value)}
-                        placeholder="הדבק כאן שיעורי בית, רשימת משימות..."
-                        rows={4}
-                      />
+                      <textarea className="form-textarea" value={documentText} onChange={e => setDocumentText(e.target.value)} placeholder="הדבק כאן שיעורי בית, רשימת משימות..." rows={4} />
                     </div>
-                    <button
-                      className="btn-primary"
-                      onClick={submitDocument}
-                      disabled={actionLoading || (!documentText.trim() && !documentFile)}
-                    >
+                    <button className="btn-primary" onClick={submitDocument} disabled={actionLoading || (!documentText.trim() && !documentFile)}>
                       {actionLoading ? 'טוען...' : 'צור משימות מהמסמך'}
                     </button>
                   </>
@@ -565,9 +507,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
                   <h2 className="modal-title">שלח מחמאה ל{child?.name}</h2>
                   <p className="modal-sub">עודד את הילד שלך בדרך חיובית</p>
                 </div>
-                {actionSuccess ? (
-                  <div className="success-box">{actionSuccess}</div>
-                ) : (
+                {actionSuccess ? <div className="success-box">{actionSuccess}</div> : (
                   <>
                     <div className="quick-chips">
                       {['כל הכבוד! 🌟', 'עבודה מצוינת! ⭐', 'אני גאה בך! 💫', 'המשך כך! 💪', 'אתה מדהים! 🎉'].map(c => (
@@ -576,19 +516,9 @@ export default function ChildDashboard({ childId }: { childId: number }) {
                     </div>
                     <div className="form-field" style={{ marginTop: 16 }}>
                       <label>מחמאה אישית</label>
-                      <textarea
-                        className="form-textarea"
-                        value={complimentText}
-                        onChange={e => setComplimentText(e.target.value)}
-                        placeholder="כתוב מחמאה אישית..."
-                        rows={3}
-                      />
+                      <textarea className="form-textarea" value={complimentText} onChange={e => setComplimentText(e.target.value)} placeholder="כתוב מחמאה אישית..." rows={3} />
                     </div>
-                    <button
-                      className="btn-primary"
-                      onClick={sendCompliment}
-                      disabled={actionLoading || !complimentText.trim()}
-                    >
+                    <button className="btn-primary" onClick={sendCompliment} disabled={actionLoading || !complimentText.trim()}>
                       {actionLoading ? 'שולח...' : 'שלח מחמאה'}
                     </button>
                   </>
@@ -604,9 +534,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
                   <h2 className="modal-title">שלח תזכורת ל{child?.name}</h2>
                   <p className="modal-sub">שלח תזכורת לגבי משימה או פעילות</p>
                 </div>
-                {actionSuccess ? (
-                  <div className="success-box">{actionSuccess}</div>
-                ) : (
+                {actionSuccess ? <div className="success-box">{actionSuccess}</div> : (
                   <>
                     <div className="quick-chips">
                       {['אל תשכח שיעורי בית!', 'זמן ללמוד!', 'יש משימה שמחכה לך'].map(c => (
@@ -615,28 +543,13 @@ export default function ChildDashboard({ childId }: { childId: number }) {
                     </div>
                     <div className="form-field" style={{ marginTop: 16 }}>
                       <label>תוכן התזכורת</label>
-                      <textarea
-                        className="form-textarea"
-                        value={reminderText}
-                        onChange={e => setReminderText(e.target.value)}
-                        placeholder="לדוגמה: אל תשכח לסיים שיעורי הבית!"
-                        rows={3}
-                      />
+                      <textarea className="form-textarea" value={reminderText} onChange={e => setReminderText(e.target.value)} placeholder="לדוגמה: אל תשכח לסיים שיעורי הבית!" rows={3} />
                     </div>
                     <div className="form-field">
                       <label>תאריך ושעה (אופציונלי)</label>
-                      <input
-                        type="datetime-local"
-                        className="form-select"
-                        value={reminderDate}
-                        onChange={e => setReminderDate(e.target.value)}
-                      />
+                      <input type="datetime-local" className="form-select" value={reminderDate} onChange={e => setReminderDate(e.target.value)} />
                     </div>
-                    <button
-                      className="btn-primary"
-                      onClick={sendReminder}
-                      disabled={actionLoading || !reminderText.trim()}
-                    >
+                    <button className="btn-primary" onClick={sendReminder} disabled={actionLoading || !reminderText.trim()}>
                       {actionLoading ? 'שולח...' : 'שלח תזכורת'}
                     </button>
                   </>
@@ -652,25 +565,13 @@ export default function ChildDashboard({ childId }: { childId: number }) {
                   <h2 className="modal-title">הוסף הורה שני</h2>
                   <p className="modal-sub">שלח הזמנה להורה שני לנהל את {child?.name}</p>
                 </div>
-                {actionSuccess ? (
-                  <div className="success-box">{actionSuccess}</div>
-                ) : (
+                {actionSuccess ? <div className="success-box">{actionSuccess}</div> : (
                   <>
                     <div className="form-field">
                       <label>אימייל ההורה השני</label>
-                      <input
-                        type="email"
-                        className="form-select"
-                        value={secondaryEmail}
-                        onChange={e => setSecondaryEmail(e.target.value)}
-                        placeholder="parent@email.com"
-                      />
+                      <input type="email" className="form-select" value={secondaryEmail} onChange={e => setSecondaryEmail(e.target.value)} placeholder="parent@email.com" />
                     </div>
-                    <button
-                      className="btn-primary"
-                      onClick={addSecondaryParent}
-                      disabled={actionLoading || !secondaryEmail.trim()}
-                    >
+                    <button className="btn-primary" onClick={addSecondaryParent} disabled={actionLoading || !secondaryEmail.trim()}>
                       {actionLoading ? 'שולח...' : 'שלח הזמנה'}
                     </button>
                   </>
