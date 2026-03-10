@@ -839,6 +839,86 @@ body {
 .kid-empty-title { font-family: var(--font-display); font-size: 1.6rem; color: var(--color-text); margin-bottom: 8px; }
 .kid-empty-sub { color: var(--color-text-muted); font-weight: 600; }
 
+/* ── Week Calendar (7-column) ──────────────────────────────── */
+.week-cal {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(120px, 1fr));
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+.week-cal-col {
+  display: flex;
+  flex-direction: column;
+  background: white;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--color-border);
+  overflow: hidden;
+  min-height: 200px;
+}
+.week-cal-today {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(108,99,255,0.15);
+}
+.week-cal-col-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  background: var(--color-bg);
+  border-bottom: 2px solid var(--color-border);
+  cursor: pointer;
+  user-select: none;
+}
+.week-cal-today .week-cal-col-header {
+  background: var(--color-primary-light);
+  border-bottom-color: var(--color-primary);
+}
+.week-cal-col-header:hover { background: var(--color-primary-light); }
+.week-cal-day-name { font-family: var(--font-display); font-size: 0.8rem; color: var(--color-text-muted); }
+.week-cal-day-num { font-family: var(--font-display); font-size: 1.2rem; color: var(--color-text); line-height: 1; }
+.week-cal-day-num.today-num {
+  background: var(--color-primary);
+  color: white;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1rem;
+}
+.week-cal-count { font-size: 0.7rem; font-weight: 700; color: var(--color-text-muted); }
+.week-cal-col-body { display: flex; flex-direction: column; gap: 5px; padding: 6px; flex: 1; }
+.week-cal-empty { text-align: center; font-size: 1.2rem; padding: 12px 0; opacity: 0.5; }
+.week-cal-card {
+  border-radius: var(--radius-sm);
+  border-right: 3px solid var(--color-border);
+  background: white;
+  padding: 5px 6px;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  box-shadow: var(--shadow-sm);
+}
+.week-cal-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.week-cal-card.urgency-overdue  { border-right-color: #FF6B6B; background: #FFF8F8; }
+.week-cal-card.urgency-today    { border-right-color: #FF9F43; background: #FFFAF4; }
+.week-cal-card.urgency-tomorrow { border-right-color: #F9CA24; background: #FFFEF5; }
+.week-cal-card.urgency-soon     { border-right-color: #A8E063; }
+.week-cal-card.urgency-done, .week-cal-card.wcc-done { opacity: 0.45; border-right-color: #6BCB77; }
+.week-cal-card.wcc-test         { border-right-color: #FF6B6B; }
+.wcc-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; }
+.wcc-emoji { font-size: 0.9rem; }
+.wcc-edit { background: none; border: none; cursor: pointer; opacity: 0.4; padding: 0; color: var(--color-text); }
+.wcc-edit:hover { opacity: 1; }
+.wcc-title { font-size: 0.78rem; font-weight: 700; color: var(--color-text); line-height: 1.3; word-break: break-word; }
+.wcc-title.done { text-decoration: line-through; color: var(--color-text-muted); }
+.wcc-chip { font-size: 0.62rem; font-weight: 800; margin-top: 3px; padding: 1px 5px; border-radius: 20px; display: inline-block; }
+.wcc-chip.chip-overdue  { background: #FFE5E5; color: #FF6B6B; }
+.wcc-chip.chip-today    { background: #FFF0DE; color: #FF9F43; }
+.wcc-chip.chip-tomorrow { background: #FFFBE0; color: #D4A000; }
+.wcc-chip.chip-soon     { background: #F0FAE4; color: #5A8A00; }
+.wcc-chip.chip-later    { background: var(--color-primary-light); color: var(--color-primary); }
+
 /* ── FAB bar ──────────────────────────────────────────────── */
 .kid-fab-bar {
   position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);

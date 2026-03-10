@@ -518,58 +518,97 @@ export default function KidDashboard() {
           <button className="kid-today-btn" onClick={() => { const d = new Date(); d.setHours(0, 0, 0, 0); setCurrentDate(d); }}>היום</button>
         </div>
 
-        {/* ── TASK LIST ── */}
+        {/* ── TASK LIST / WEEK CALENDAR ── */}
         <div className="kid-tasks-section">
-          <div className="kid-tasks-header">
-            <h2 className="kid-tasks-title">כל המשימות</h2>
-            <span className="kid-tasks-count">{visibleTasks.length}</span>
-          </div>
-
           {tasksLoading ? (
             <div className="tasks-loading"><div className="spinner" /></div>
-          ) : visibleTasks.length === 0 ? (
-            <div className="kid-empty">
-              <div className="kid-empty-emoji">🎉</div>
-              <div className="kid-empty-title">אין משימות!</div>
-              <div className="kid-empty-sub">כל הכבוד, אין לך משימות לתקופה זו</div>
-            </div>
-          ) : (
-            <div className="kid-task-list">
-              {visibleTasks.map(task => {
-                const uk = urgencyKey(task.due_date, task.status);
+          ) : view === 'week' ? (
+            /* ── WEEK CALENDAR (7-column) ── */
+            <div className="week-cal">
+              {wDays.map((day, i) => {
+                const dayTasks = sortByUrgency(weekAllTasks.filter(t => sameDay(new Date(t.due_date * 1000), day)));
+                const isToday = sameDay(day, today);
+                const doneCnt2 = dayTasks.filter(t => t.status === 'done').length;
                 return (
-                  <div key={task.id} className={`kid-task urgency-${uk}${isTest(task) && uk !== 'done' ? ' is-test' : ''}`}
-                    onClick={() => toggleStatus(task)}>
-                    <div className="kid-task-left">
-                      <div className="kid-task-check">{statusIcon(task.status)}</div>
-                    </div>
-                    <div className="kid-task-body">
-                      <div className="kid-task-title-row">
-                        <span className="kid-task-emoji">{typeEmoji(task.type)}</span>
-                        <span className={`kid-task-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
-                        {uk !== 'done' && uk !== 'later' && (
-                          <span className={`urgency-chip chip-${uk}`}>{urgencyLabel[uk]}</span>
-                        )}
-                      </div>
-                      {task.description && <div className="kid-task-desc">{task.description}</div>}
-                      <div className="kid-task-footer">
-                        <span className="kid-task-reldate">{relativeDate(task.due_date)}</span>
-                      </div>
-                    </div>
-                    <div className="kid-task-actions">
-                      {task.status !== 'done' && (
-                        <button className="kid-focus-mini" onClick={e => openFocus(task, e)} title="התמקד">
-                          <Play size={13} />
-                        </button>
+                  <div key={i} className={`week-cal-col${isToday ? ' week-cal-today' : ''}`}>
+                    <div className="week-cal-col-header" onClick={() => { setCurrentDate(day); setView('day'); }}>
+                      <div className="week-cal-day-name">{HEBREW_DAYS[day.getDay()]}</div>
+                      <div className={`week-cal-day-num${isToday ? ' today-num' : ''}`}>{day.getDate()}</div>
+                      {dayTasks.length > 0 && (
+                        <div className="week-cal-count">{doneCnt2}/{dayTasks.length}</div>
                       )}
-                      <button className="kid-edit-btn" onClick={e => openEdit(task, e)} title="עריכה">
-                        <Edit3 size={14} />
-                      </button>
+                    </div>
+                    <div className="week-cal-col-body">
+                      {dayTasks.length === 0 ? (
+                        <div className="week-cal-empty">✨</div>
+                      ) : (
+                        dayTasks.map(task => {
+                          const uk = urgencyKey(task.due_date, task.status);
+                          return (
+                            <div key={task.id}
+                              className={`week-cal-card urgency-${uk}${task.status === 'done' ? ' wcc-done' : ''}${isTest(task) && task.status !== 'done' ? ' wcc-test' : ''}`}
+                              onClick={() => toggleStatus(task)}>
+                              <div className="wcc-top">
+                                <span className="wcc-emoji">{typeEmoji(task.type)}</span>
+                                <button className="wcc-edit" onClick={e => openEdit(task, e)}><Edit3 size={11} /></button>
+                              </div>
+                              <div className={`wcc-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</div>
+                              {task.status !== 'done' && <div className={`wcc-chip chip-${uk}`}>{urgencyLabel[uk] ?? ''}</div>}
+                            </div>
+                          );
+                        })
+                      )}
                     </div>
                   </div>
                 );
               })}
             </div>
+          ) : (
+            /* ── DAY VIEW ── */
+            visibleTasks.length === 0 ? (
+              <div className="kid-empty">
+                <div className="kid-empty-emoji">🎉</div>
+                <div className="kid-empty-title">אין משימות!</div>
+                <div className="kid-empty-sub">כל הכבוד, אין לך משימות לתקופה זו</div>
+              </div>
+            ) : (
+              <div className="kid-task-list">
+                {visibleTasks.map(task => {
+                  const uk = urgencyKey(task.due_date, task.status);
+                  return (
+                    <div key={task.id} className={`kid-task urgency-${uk}${isTest(task) && uk !== 'done' ? ' is-test' : ''}`}
+                      onClick={() => toggleStatus(task)}>
+                      <div className="kid-task-left">
+                        <div className="kid-task-check">{statusIcon(task.status)}</div>
+                      </div>
+                      <div className="kid-task-body">
+                        <div className="kid-task-title-row">
+                          <span className="kid-task-emoji">{typeEmoji(task.type)}</span>
+                          <span className={`kid-task-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
+                          {uk !== 'done' && uk !== 'later' && (
+                            <span className={`urgency-chip chip-${uk}`}>{urgencyLabel[uk]}</span>
+                          )}
+                        </div>
+                        {task.description && <div className="kid-task-desc">{task.description}</div>}
+                        <div className="kid-task-footer">
+                          <span className="kid-task-reldate">{relativeDate(task.due_date)}</span>
+                        </div>
+                      </div>
+                      <div className="kid-task-actions">
+                        {task.status !== 'done' && (
+                          <button className="kid-focus-mini" onClick={e => openFocus(task, e)} title="התמקד">
+                            <Play size={13} />
+                          </button>
+                        )}
+                        <button className="kid-edit-btn" onClick={e => openEdit(task, e)} title="עריכה">
+                          <Edit3 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )
           )}
         </div>
       </main>
