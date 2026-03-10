@@ -9,7 +9,7 @@ const extractArray = (d: unknown) => {
   }
   return [];
 };
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import {
@@ -69,11 +69,13 @@ function formatDateForAPI(date: Date): string {
   return date.toISOString().split('T')[0];
 }
 
+const CACHE_TTL = 5 * 60 * 1000;
+
 export default function ChildDashboard({ childId }: { childId: number }) {
   const { authToken } = useAuth();
   const router = useRouter();
   const [child, setChild] = useState<Child | null>(null);
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [weekAllTasks, setWeekAllTasks] = useState<Task[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
   const [view, setView] = useState<'day' | 'week'>('day');
   const [currentDate, setCurrentDate] = useState(() => {
@@ -81,6 +83,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     d.setHours(0, 0, 0, 0);
     return d;
   });
+  const cacheRef = useRef<{ weekKey: string; fetchedAt: number } | null>(null);
   const [activeModal, setActiveModal] = useState<null | 'bot' | 'document' | 'compliment' | 'reminder' | 'secondary'>(null);
 
   // Bot
@@ -112,7 +115,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
   const [documentFile, setDocumentFile] = useState<File | null>(null);
 
   useEffect(() => { fetchChild(); }, [childId]);
-  useEffect(() => { fetchTasks(); }, [childId, currentDate, view]);
+  useEffect(() => { fetchWeekData(); }, [childId, currentDate]);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [botMessages]);
 
   async function fetchChild() {
@@ -124,26 +127,31 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     } catch {}
   }
 
-  async function fetchTasks() {
+  const fetchWeekData = useCallback(async (force = false) => {
+    const days = getWeekDays(currentDate);
+    const key = formatDateForAPI(days[0]);
+    const now = Date.now();
+    if (!force && cacheRef.current?.weekKey === key && now - cacheRef.current.fetchedAt < CACHE_TTL) return;
     setTasksLoading(true);
     try {
-      const weekDays = getWeekDays(currentDate);
-      const start = view === 'week' ? weekDays[0] : currentDate;
-      const end = view === 'week' ? weekDays[6] : currentDate;
-      const url = `${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}?start=${formatDateForAPI(start)}&end=${formatDateForAPI(end)}`;
+      const url = `${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}?start=${formatDateForAPI(days[0])}&end=${formatDateForAPI(days[6])}`;
       const res = await fetch(url, { headers: { 'Authorization': `Bearer ${authToken}` } });
-      if (res.ok) { setTasks(extractArray(await res.json())); }
-      else setTasks([]);
+      if (res.ok) {
+        setWeekAllTasks(extractArray(await res.json()));
+        cacheRef.current = { weekKey: key, fetchedAt: now };
+      } else {
+        setWeekAllTasks([]);
+      }
     } catch {
-      setTasks([]);
+      setWeekAllTasks([]);
     } finally {
       setTasksLoading(false);
     }
-  }
+  }, [currentDate, childId, authToken]);
 
   async function toggleTaskStatus(task: Task) {
     const next: Task['status'] = task.status === 'pending' ? 'in_progress' : task.status === 'in_progress' ? 'done' : 'pending';
-    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: next } : t));
+    setWeekAllTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: next } : t));
     try {
       await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.UPDATE_TASK(childId, task.id)}`, {
         method: 'PATCH',
@@ -169,7 +177,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
       });
       const data = await res.json();
       setBotMessages(prev => [...prev, { role: 'bot', text: data.reply || 'המשימה נוצרה בהצלחה!' }]);
-      if (data.task_created) fetchTasks();
+      if (data.task_created) fetchWeekData(true);
     } catch {
       setBotMessages(prev => [...prev, { role: 'bot', text: 'מצטער, אירעה שגיאה. נסה שוב.' }]);
     } finally {
@@ -193,7 +201,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
       const raw = await res.text();
       const data = raw ? JSON.parse(raw) : {};
       setBotMessages(prev => [...prev, { role: 'bot', text: data.reply || 'מעולה! המשימות נוספו מהמסמך! ✅' }]);
-      fetchTasks();
+      fetchWeekData(true);
     } catch (e) {
       setBotMessages(prev => [...prev, { role: 'bot', text: 'שגיאה בעיבוד הקובץ. נסה שוב.' }]);
     } finally { setBotLoading(false); }
@@ -270,7 +278,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
       setActionSuccess('המסמך נטען ומשימות נוצרו בהצלחה!');
       setDocumentText('');
       setDocumentFile(null);
-      fetchTasks();
+      fetchWeekData(true);
     } catch {
       setActionSuccess('');
     } finally {
@@ -310,8 +318,8 @@ export default function ChildDashboard({ childId }: { childId: number }) {
   const today = new Date();
 
   const visibleTasks = view === 'day'
-    ? tasks.filter(t => sameDay(new Date(t.due_date * 1000), currentDate))
-    : tasks;
+    ? weekAllTasks.filter(t => sameDay(new Date(t.due_date * 1000), currentDate))
+    : weekAllTasks;
 
   const dateLabel = view === 'day'
     ? `${HEBREW_DAY_NAMES[currentDate.getDay()]}, ${currentDate.getDate()} ${HEBREW_MONTHS[currentDate.getMonth()]} ${currentDate.getFullYear()}`
@@ -370,7 +378,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
         {view === 'week' && (
           <div className="week-strip">
             {weekDays.map((day, i) => {
-              const dayTaskCount = tasks.filter(t => sameDay(new Date(t.due_date * 1000), day)).length;
+              const dayTaskCount = weekAllTasks.filter(t => sameDay(new Date(t.due_date * 1000), day)).length;
               const isToday = sameDay(day, today);
               return (
                 <div
