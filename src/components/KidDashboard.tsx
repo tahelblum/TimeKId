@@ -131,16 +131,16 @@ export default function KidDashboard() {
   const router = useRouter();
 
   // Tasks & view
-  const [tasks, setTasks] = useState<Task[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
   const [view, setView] = useState<'day' | 'week'>('day');
   const [currentDate, setCurrentDate] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; });
 
-  // Upcoming tests (7-day window)
-  const [upcomingTests, setUpcomingTests] = useState<Task[]>([]);
-
-  // Full week data for the always-visible preview (independent of day/week view)
+  // Single source of truth — all tasks for the currently viewed week
   const [weekAllTasks, setWeekAllTasks] = useState<Task[]>([]);
+
+  // Cache tracking
+  const cacheRef = useRef<{ weekKey: string; fetchedAt: number } | null>(null);
+  const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   // Gamification
   const [points, setPoints] = useState(0);
@@ -192,54 +192,33 @@ export default function KidDashboard() {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
 
-  // ─── Data fetching ─────────────────────────────────────────────────────────
-  const fetchTasks = useCallback(async () => {
+  // ─── Data fetching (single cached fetch per week) ──────────────────────────
+  const fetchWeekData = useCallback(async (force = false) => {
+    const days = weekDays(currentDate);
+    const key = toAPIDate(days[0]);
+    const now = Date.now();
+    if (!force && cacheRef.current?.weekKey === key && now - cacheRef.current.fetchedAt < CACHE_TTL) return;
     setTasksLoading(true);
     try {
-      const days = weekDays(currentDate);
-      const start = view === 'week' ? days[0] : currentDate;
-      const end = view === 'week' ? days[6] : currentDate;
-      const url = `${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${toAPIDate(start)}&end=${toAPIDate(end)}`;
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${authToken}` } });
-      if (res.ok) { const d = await res.json(); setTasks(extractArray(d)); } else setTasks([]);
-    } catch { setTasks([]); } finally { setTasksLoading(false); }
-  }, [currentDate, view, authToken]);
-
-  const fetchWeekAllTasks = useCallback(async () => {
-    const days = weekDays(currentDate);
-    const url = `${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${toAPIDate(days[0])}&end=${toAPIDate(days[6])}`;
-    try {
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${authToken}` } });
-      if (res.ok) { const d = await res.json(); setWeekAllTasks(extractArray(d)); }
-    } catch {}
-  }, [currentDate, authToken]);
-
-  const fetchUpcomingTests = useCallback(async () => {
-    try {
-      const today = new Date(); today.setHours(0, 0, 0, 0);
-      const future = new Date(today); future.setDate(future.getDate() + 7);
-      const url = `${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${toAPIDate(today)}&end=${toAPIDate(future)}`;
+      const url = `${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${toAPIDate(days[0])}&end=${toAPIDate(days[6])}`;
       const res = await fetch(url, { headers: { Authorization: `Bearer ${authToken}` } });
       if (res.ok) {
         const all: Task[] = extractArray(await res.json());
-        setUpcomingTests(all.filter(t => isTest(t) && t.status !== 'done' && daysUntil(t.due_date) >= 0));
+        setWeekAllTasks(all);
+        cacheRef.current = { weekKey: key, fetchedAt: now };
       }
-    } catch {}
-  }, [authToken]);
+    } catch {} finally { setTasksLoading(false); }
+  }, [currentDate, authToken]);
 
-  useEffect(() => { fetchTasks(); }, [fetchTasks]);
-  useEffect(() => { fetchWeekAllTasks(); }, [fetchWeekAllTasks]);
-  useEffect(() => { fetchUpcomingTests(); }, [fetchUpcomingTests]);
+  useEffect(() => { fetchWeekData(); }, [fetchWeekData]);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
 
   // ─── Actions ───────────────────────────────────────────────────────────────
   async function toggleStatus(task: Task) {
     const next: Task['status'] = task.status === 'pending' ? 'in_progress' : task.status === 'in_progress' ? 'done' : 'pending';
-    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: next } : t));
     setWeekAllTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: next } : t));
     if (next === 'done') {
       setCelebration(task);
-      setUpcomingTests(prev => prev.filter(t => t.id !== task.id));
       const newPoints = earnPoints(10);
       const newStreak = updateStreak();
       setPoints(newPoints);
@@ -285,7 +264,6 @@ export default function KidDashboard() {
         headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: editForm.title, description: editForm.description, type: editForm.type, due_date }),
       });
-      setTasks(prev => prev.map(t => t.id === editTask.id ? { ...t, title: editForm.title, description: editForm.description, type: editForm.type, due_date } : t));
       setWeekAllTasks(prev => prev.map(t => t.id === editTask.id ? { ...t, title: editForm.title, description: editForm.description, type: editForm.type, due_date } : t));
       setEditTask(null);
     } catch {} finally { setEditLoading(false); }
@@ -304,7 +282,7 @@ export default function KidDashboard() {
       });
       const data = await res.json();
       setChatMessages(prev => [...prev, { role: 'bot', text: data.reply || 'נוצרה משימה חדשה! ✅' }]);
-      if (data.task_created) { fetchTasks(); fetchUpcomingTests(); }
+      if (data.task_created) fetchWeekData(true);
     } catch {
       setChatMessages(prev => [...prev, { role: 'bot', text: 'אירעה שגיאה. נסה שוב.' }]);
     } finally { setChatLoading(false); }
@@ -326,7 +304,7 @@ export default function KidDashboard() {
       const raw = await res.text();
       const data = raw ? JSON.parse(raw) : {};
       setChatMessages(prev => [...prev, { role: 'bot', text: data.reply || 'מעולה! המשימות נוספו מהמסמך! ✅' }]);
-      fetchTasks(); fetchUpcomingTests();
+      fetchWeekData(true);
     } catch {
       setChatMessages(prev => [...prev, { role: 'bot', text: 'אירעה שגיאה בעיבוד הקובץ.' }]);
     } finally { setChatLoading(false); }
@@ -345,7 +323,7 @@ export default function KidDashboard() {
       } catch {}
     }
     setSchedulerTest(null); setStudySessions(['']); setSchedulerLoading(false);
-    fetchTasks(); fetchUpcomingTests();
+    fetchWeekData(true);
   }
 
   // ─── Derived ───────────────────────────────────────────────────────────────
@@ -353,11 +331,12 @@ export default function KidDashboard() {
   const today = new Date();
 
   const rawVisible = view === 'day'
-    ? tasks.filter(t => sameDay(new Date(t.due_date * 1000), currentDate))
-    : tasks;
+    ? weekAllTasks.filter(t => sameDay(new Date(t.due_date * 1000), currentDate))
+    : weekAllTasks;
   const visibleTasks = sortByUrgency(rawVisible);
   const doneCnt = visibleTasks.filter(t => t.status === 'done').length;
   const pendingTasks = visibleTasks.filter(t => t.status !== 'done');
+  const upcomingTests = weekAllTasks.filter(t => isTest(t) && t.status !== 'done' && daysUntil(t.due_date) >= 0);
   const heroTask = pendingTasks[0] || null;
 
   const dateLabel = view === 'day'
