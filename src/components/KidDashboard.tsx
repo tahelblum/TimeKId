@@ -213,8 +213,12 @@ export default function KidDashboard() {
   const [schoolLoading, setSchoolLoading] = useState(false);
 
   // Drag & drop
-  const [dragOverDayIdx, setDragOverDayIdx] = useState<number | null>(null);
+  const [dragOverCell, setDragOverCell] = useState<{ di: number; hour: number } | null>(null);
   const dragTaskId = useRef<number | null>(null);
+
+  // Calendar body ref for scrolling to current hour
+  const calBodyRef = useRef<HTMLDivElement>(null);
+  const ROW_HEIGHT = 56;
 
   // ─── Data fetching (single cached fetch per week) ──────────────────────────
   const fetchWeekData = useCallback(async (force = false) => {
@@ -236,6 +240,12 @@ export default function KidDashboard() {
 
   useEffect(() => { fetchWeekData(); }, [fetchWeekData]);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
+  useEffect(() => {
+    if (calBodyRef.current) {
+      const nowIdx = GRID_HOURS.indexOf(new Date().getHours());
+      calBodyRef.current.scrollTop = Math.max(0, (nowIdx - 1) * ROW_HEIGHT);
+    }
+  }, [view]);
 
   // Auto-complete school tasks whose time has passed
   useEffect(() => {
@@ -356,11 +366,11 @@ export default function KidDashboard() {
     } finally { setChatLoading(false); }
   }
 
-  async function moveTaskToDay(taskId: number, targetDay: Date) {
+  async function moveTaskToDayHour(taskId: number, targetDay: Date, hour: number) {
     const task = weekAllTasks.find(t => t.id === taskId);
     if (!task) return;
-    const hour = getTaskHour(task.due_date);
-    const newTs = tsFromDateAndHour(dayStrOf(targetDay), hour);
+    const mins = new Date(task.due_date * 1000).getMinutes();
+    const newTs = tsFromDateAndHour(dayStrOf(targetDay), hour) + mins * 60;
     setWeekAllTasks(prev => prev.map(t => t.id === taskId ? { ...t, due_date: newTs } : t));
     try {
       await fetch(`${API_URL}${API_ENDPOINTS.CHILD.UPDATE_TASK(taskId)}`, {
@@ -577,140 +587,132 @@ export default function KidDashboard() {
         <div className="kid-cal-controls">
           <div className="kid-view-toggle">
             <button className={`kid-view-btn${view === 'day' ? ' active' : ''}`} onClick={() => setView('day')}>יום</button>
-            <button className={`kid-view-btn${view === 'week' ? ' active' : ''}`} onClick={() => setView('week')}>כל השבוע</button>
+            <button className={`kid-view-btn${view === 'week' ? ' active' : ''}`} onClick={() => setView('week')}>שבוע</button>
           </div>
-          <span className="kid-date-label" style={{ flex: 1, textAlign: 'center' }}>{dateLabel}</span>
+          <div className="kid-cal-nav">
+            <button className="nav-arrow" onClick={() => navDate(view === 'week' ? -7 : -1)}><ChevronRight size={18} /></button>
+            <span className="kid-date-label">{dateLabel}</span>
+            <button className="nav-arrow" onClick={() => navDate(view === 'week' ? 7 : 1)}><ChevronLeft size={18} /></button>
+          </div>
           <button className="kid-today-btn" onClick={() => { const d = new Date(); d.setHours(0, 0, 0, 0); setCurrentDate(d); }}>היום</button>
         </div>
 
-        {/* ── TASK LIST / WEEK CALENDAR ── */}
+        {/* ── SMART CALENDAR (unified time-grid for both day & week) ── */}
         <div className="kid-tasks-section">
           {tasksLoading ? (
             <div className="tasks-loading"><div className="spinner" /></div>
-          ) : view === 'week' ? (
-            /* ── WEEK CALENDAR (7-column) ── */
-            <div className="week-cal">
-              {wDays.map((day, i) => {
-                const dayTasks = sortByUrgency(weekAllTasks.filter(t => sameDay(new Date(t.due_date * 1000), day)));
-                const isToday = sameDay(day, today);
-                const doneCnt2 = dayTasks.filter(t => t.status === 'done').length;
-                return (
-                  <div key={i}
-                    className={`week-cal-col${isToday ? ' week-cal-today' : ''}${dragOverDayIdx === i ? ' drag-over' : ''}`}
-                    onDragOver={e => { e.preventDefault(); setDragOverDayIdx(i); }}
-                    onDragLeave={() => setDragOverDayIdx(null)}
-                    onDrop={e => { e.preventDefault(); setDragOverDayIdx(null); if (dragTaskId.current !== null) moveTaskToDay(dragTaskId.current, day); }}>
-                    <div className="week-cal-col-header" onClick={() => { setCurrentDate(day); setView('day'); }}>
-                      <div className="week-cal-day-name">{HEBREW_DAYS[day.getDay()]}</div>
-                      <div className={`week-cal-day-num${isToday ? ' today-num' : ''}`}>{day.getDate()}</div>
-                      {dayTasks.length > 0 && (
-                        <div className="week-cal-count">{doneCnt2}/{dayTasks.length}</div>
-                      )}
+          ) : (
+            <div className="smart-cal-outer">
+              {/* Column headers */}
+              <div className="smart-cal-head">
+                <div className="sc-corner" />
+                {(view === 'day' ? [currentDate] : wDays).map((day, i) => {
+                  const isToday = sameDay(day, today);
+                  const dayDone = weekAllTasks.filter(t => sameDay(new Date(t.due_date * 1000), day) && t.status === 'done').length;
+                  const dayTotal = weekAllTasks.filter(t => sameDay(new Date(t.due_date * 1000), day)).length;
+                  return (
+                    <div key={i} className={`sc-day-head${isToday ? ' sc-today-head' : ''}`}
+                      onClick={() => { setCurrentDate(day); if (view === 'week') setView('day'); }}>
+                      <span className="sc-day-name">{HEBREW_DAYS[day.getDay()]}</span>
+                      <span className={`sc-day-num${isToday ? ' sc-today-num' : ''}`}>{day.getDate()}</span>
+                      {dayTotal > 0 && <span className="sc-day-prog">{dayDone}/{dayTotal}</span>}
                     </div>
-                    <div className="week-cal-col-body">
-                      {dayTasks.length === 0 ? (
-                        <div className="week-cal-empty">✨</div>
-                      ) : (
-                        dayTasks.map(task => {
+                  );
+                })}
+              </div>
+
+              {/* Time grid body */}
+              <div className="smart-cal-body" ref={calBodyRef}>
+                {/* "Now" line */}
+                {(() => {
+                  const now = new Date();
+                  const nowIdx = GRID_HOURS.indexOf(now.getHours());
+                  const showNow = view === 'day'
+                    ? sameDay(currentDate, today)
+                    : wDays.some(d => sameDay(d, today));
+                  if (!showNow || nowIdx < 0) return null;
+                  const top = nowIdx * ROW_HEIGHT + (now.getMinutes() / 60) * ROW_HEIGHT;
+                  return <div className="sc-now-line" style={{ top }} />;
+                })()}
+
+                {GRID_HOURS.map(hour => {
+                  const calDays = view === 'day' ? [currentDate] : wDays;
+                  return (
+                    <div key={hour} className="sc-row">
+                      <div className="sc-time-label">{String(hour).padStart(2, '0')}:00</div>
+                      {calDays.map((day, di) => {
+                        const isToday = sameDay(day, today);
+                        const cellTasks = sortByUrgency(
+                          weekAllTasks.filter(t => sameDay(new Date(t.due_date * 1000), day) && getTaskHour(t.due_date) === hour)
+                        );
+                        const isDragOver = dragOverCell?.di === di && dragOverCell?.hour === hour;
+                        return (
+                          <div key={di}
+                            className={`sc-cell${isToday ? ' sc-today-col' : ''}${isDragOver ? ' sc-drag-over' : ''}`}
+                            onDragOver={e => { e.preventDefault(); setDragOverCell({ di, hour }); }}
+                            onDragLeave={() => setDragOverCell(null)}
+                            onDrop={e => {
+                              e.preventDefault(); setDragOverCell(null);
+                              if (dragTaskId.current !== null) moveTaskToDayHour(dragTaskId.current, day, hour);
+                            }}>
+                            {cellTasks.map(task => {
+                              const uk = urgencyKey(task.due_date, task.status);
+                              return (
+                                <div key={task.id}
+                                  draggable
+                                  onDragStart={e => { e.dataTransfer.setData('text/plain', String(task.id)); dragTaskId.current = task.id; }}
+                                  onDragEnd={() => { dragTaskId.current = null; setDragOverCell(null); }}
+                                  className={`sc-event ev-${task.type} urgency-${uk}${task.status === 'done' ? ' ev-done' : ''}${isTest(task) && task.status !== 'done' ? ' ev-test' : ''}`}
+                                  onClick={e => { e.stopPropagation(); toggleStatus(task); }}>
+                                  <span className="ev-emoji">{typeEmoji(task.type)}</span>
+                                  <span className={`ev-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
+                                  <button className="ev-edit" onClick={e => openEdit(task, e)}><Edit3 size={10} /></button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+
+                {/* Tasks outside grid hours */}
+                {(() => {
+                  const calDays = view === 'day' ? [currentDate] : wDays;
+                  const out = weekAllTasks.filter(t =>
+                    calDays.some(d => sameDay(new Date(t.due_date * 1000), d)) &&
+                    !GRID_HOURS.includes(getTaskHour(t.due_date))
+                  );
+                  if (!out.length) return null;
+                  return (
+                    <div className="sc-row sc-allday-row">
+                      <div className="sc-time-label">📌</div>
+                      <div className="sc-allday-tasks">
+                        {sortByUrgency(out).map(task => {
                           const uk = urgencyKey(task.due_date, task.status);
                           return (
                             <div key={task.id}
-                              draggable
-                              onDragStart={e => { e.dataTransfer.setData('text/plain', String(task.id)); dragTaskId.current = task.id; }}
-                              onDragEnd={() => { dragTaskId.current = null; setDragOverDayIdx(null); }}
-                              className={`week-cal-card urgency-${uk}${task.status === 'done' ? ' wcc-done' : ''}${isTest(task) && task.status !== 'done' ? ' wcc-test' : ''}`}
+                              className={`sc-event ev-${task.type} urgency-${uk}${task.status === 'done' ? ' ev-done' : ''}`}
                               onClick={() => toggleStatus(task)}>
-                              <div className="wcc-top">
-                                <span className="wcc-emoji">{typeEmoji(task.type)}</span>
-                                <button className="wcc-edit" onClick={e => openEdit(task, e)}><Edit3 size={11} /></button>
-                              </div>
-                              <div className={`wcc-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</div>
-                              <div className="wcc-time">{getTaskTimeLabel(task.due_date)}</div>
-                              {task.status !== 'done' && <div className={`wcc-chip chip-${uk}`}>{urgencyLabel[uk] ?? ''}</div>}
+                              <span className="ev-emoji">{typeEmoji(task.type)}</span>
+                              <span className={`ev-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
+                              <button className="ev-edit" onClick={e => openEdit(task, e)}><Edit3 size={10} /></button>
                             </div>
                           );
-                        })
-                      )}
+                        })}
+                      </div>
                     </div>
+                  );
+                })()}
+
+                {weekAllTasks.filter(t => view === 'day' ? sameDay(new Date(t.due_date * 1000), currentDate) : true).length === 0 && (
+                  <div className="sc-empty">
+                    <div className="kid-empty-emoji">🎉</div>
+                    <div className="kid-empty-title">אין משימות!</div>
                   </div>
-                );
-              })}
-            </div>
-          ) : (
-            /* ── DAY VIEW (TIME GRID) ── */
-            <div className="time-grid">
-              {visibleTasks.length === 0 && (
-                <div className="kid-empty">
-                  <div className="kid-empty-emoji">🎉</div>
-                  <div className="kid-empty-title">אין משימות!</div>
-                  <div className="kid-empty-sub">כל הכבוד, אין לך משימות לתקופה זו</div>
-                </div>
-              )}
-              {GRID_HOURS.map(hour => {
-                const hourTasks = sortByUrgency(visibleTasks.filter(t => getTaskHour(t.due_date) === hour));
-                const nowHour = new Date().getHours();
-                const isCurrentHour = sameDay(currentDate, today) && hour === nowHour;
-                return (
-                  <div key={hour}
-                    className={`time-row${hourTasks.some(t => t.type === 'school') ? ' school-hour' : ''}${hourTasks.length === 0 ? ' empty-hour' : ''}${isCurrentHour ? ' current-hour' : ''}`}>
-                    <div className="time-row-label">
-                      {String(hour).padStart(2, '0')}:00
-                      {isCurrentHour && <div className="now-dot" />}
-                    </div>
-                    <div className="time-row-content">
-                      {hourTasks.map(task => {
-                        const uk = urgencyKey(task.due_date, task.status);
-                        return (
-                          <div key={task.id}
-                            className={`time-task urgency-${uk}${task.type === 'school' ? ' school-task' : ''}${isTest(task) && uk !== 'done' ? ' is-test' : ''}${task.status === 'done' ? ' tt-done' : ''}`}
-                            onClick={() => toggleStatus(task)}>
-                            <span className="time-task-emoji">{typeEmoji(task.type)}</span>
-                            <div className="time-task-body">
-                              <span className={`time-task-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
-                              <span className="time-task-time">{getTaskTimeLabel(task.due_date)}</span>
-                            </div>
-                            <div className="time-task-actions">
-                              {task.status !== 'done' && task.type !== 'school' && (
-                                <button className="tt-btn" onClick={e => openFocus(task, e)}><Play size={11} /></button>
-                              )}
-                              <button className="tt-btn" onClick={e => openEdit(task, e)}><Edit3 size={11} /></button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-              {/* Tasks outside grid hours */}
-              {(() => {
-                const out = sortByUrgency(visibleTasks.filter(t => !GRID_HOURS.includes(getTaskHour(t.due_date))));
-                if (!out.length) return null;
-                return (
-                  <div className="time-row">
-                    <div className="time-row-label">📌</div>
-                    <div className="time-row-content">
-                      {out.map(task => {
-                        const uk = urgencyKey(task.due_date, task.status);
-                        return (
-                          <div key={task.id}
-                            className={`time-task urgency-${uk}${task.status === 'done' ? ' tt-done' : ''}`}
-                            onClick={() => toggleStatus(task)}>
-                            <span className="time-task-emoji">{typeEmoji(task.type)}</span>
-                            <div className="time-task-body">
-                              <span className={`time-task-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
-                            </div>
-                            <div className="time-task-actions">
-                              {task.status !== 'done' && <button className="tt-btn" onClick={e => openFocus(task, e)}><Play size={11} /></button>}
-                              <button className="tt-btn" onClick={e => openEdit(task, e)}><Edit3 size={11} /></button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })()}
+                )}
+              </div>
             </div>
           )}
         </div>
