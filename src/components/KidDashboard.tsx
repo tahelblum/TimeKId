@@ -29,9 +29,14 @@ interface Task {
   description: string;
   due_date: number;
   status: 'pending' | 'in_progress' | 'done';
-  type: 'homework' | 'test' | 'activity' | 'other';
+  type: 'homework' | 'test' | 'activity' | 'other' | 'school';
 }
 interface ChatMessage { role: 'user' | 'bot'; text: string; }
+
+// ─── Calendar / school constants ──────────────────────────────────────────────
+const GRID_HOURS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
+const SCHOOL_PERIODS = [8, 9, 10, 11, 12, 13, 14];
+const SCHOOL_DAYS_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי'];
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const ENCOURAGING = [
@@ -66,6 +71,17 @@ function daysUntil(ts: number): number {
   return Math.round((due.getTime() - now.getTime()) / 86400000);
 }
 function tsFromDateStr(s: string) { return Math.floor(new Date(s + 'T12:00:00').getTime() / 1000); }
+function getTaskHour(ts: number): number { return new Date(ts * 1000).getHours(); }
+function getTaskTimeLabel(ts: number): string {
+  const d = new Date(ts * 1000);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+function tsFromDateAndHour(dateStr: string, hour: number): number {
+  return Math.floor(new Date(`${dateStr}T${String(hour).padStart(2, '0')}:00:00`).getTime() / 1000);
+}
+function dayStrOf(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 function dateStrFromTs(ts: number) {
   const d = new Date(ts * 1000);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -191,6 +207,14 @@ export default function KidDashboard() {
   const chatFileRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // School schedule
+  const [showSchoolModal, setShowSchoolModal] = useState(false);
+  const [schoolGrid, setSchoolGrid] = useState<Record<string, string>>({});
+  const [schoolLoading, setSchoolLoading] = useState(false);
+
+  // Drag & drop
+  const [dragOverDayIdx, setDragOverDayIdx] = useState<number | null>(null);
+  const dragTaskId = useRef<number | null>(null);
 
   // ─── Data fetching (single cached fetch per week) ──────────────────────────
   const fetchWeekData = useCallback(async (force = false) => {
@@ -212,6 +236,28 @@ export default function KidDashboard() {
 
   useEffect(() => { fetchWeekData(); }, [fetchWeekData]);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
+
+  // Auto-complete school tasks whose time has passed
+  useEffect(() => {
+    const autoComplete = () => {
+      const now = Math.floor(Date.now() / 1000);
+      setWeekAllTasks(prev => {
+        const toComplete = prev.filter(t => t.type === 'school' && t.status !== 'done' && t.due_date < now);
+        if (!toComplete.length) return prev;
+        toComplete.forEach(task => {
+          fetch(`${API_URL}${API_ENDPOINTS.CHILD.UPDATE_TASK(task.id)}`, {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'done' }),
+          }).catch(() => {});
+        });
+        return prev.map(t => toComplete.some(c => c.id === t.id) ? { ...t, status: 'done' } : t);
+      });
+    };
+    autoComplete();
+    const interval = setInterval(autoComplete, 60000);
+    return () => clearInterval(interval);
+  }, [authToken]);
 
   // ─── Actions ───────────────────────────────────────────────────────────────
   async function toggleStatus(task: Task) {
@@ -310,6 +356,46 @@ export default function KidDashboard() {
     } finally { setChatLoading(false); }
   }
 
+  async function moveTaskToDay(taskId: number, targetDay: Date) {
+    const task = weekAllTasks.find(t => t.id === taskId);
+    if (!task) return;
+    const hour = getTaskHour(task.due_date);
+    const newTs = tsFromDateAndHour(dayStrOf(targetDay), hour);
+    setWeekAllTasks(prev => prev.map(t => t.id === taskId ? { ...t, due_date: newTs } : t));
+    try {
+      await fetch(`${API_URL}${API_ENDPOINTS.CHILD.UPDATE_TASK(taskId)}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ due_date: newTs }),
+      });
+    } catch {}
+  }
+
+  async function submitSchoolSchedule() {
+    const entries = Object.entries(schoolGrid).filter(([, v]) => v.trim());
+    if (!entries.length) return;
+    setSchoolLoading(true);
+    for (const [key, subject] of entries) {
+      const [dayIdxStr, hourStr] = key.split('-');
+      const dayIdx = parseInt(dayIdxStr);
+      const hour = parseInt(hourStr);
+      const targetDay = wDays[dayIdx];
+      if (!targetDay) continue;
+      const ts = tsFromDateAndHour(dayStrOf(targetDay), hour);
+      try {
+        await fetch(`${API_URL}/Task`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: subject, type: 'school', status: 'pending', due_date: ts, child_id: child?.id }),
+        });
+      } catch {}
+    }
+    setSchoolLoading(false);
+    setShowSchoolModal(false);
+    setSchoolGrid({});
+    fetchWeekData(true);
+  }
+
   async function scheduleStudy() {
     if (!schedulerTest) return;
     setSchedulerLoading(true);
@@ -347,7 +433,7 @@ export default function KidDashboard() {
     const d = new Date(prev); d.setDate(d.getDate() + delta); return d;
   });
 
-  const typeEmoji = (t: Task['type']) => ({ homework: '📚', test: '📝', activity: '🎨', other: '✏️' }[t]);
+  const typeEmoji = (t: Task['type']) => ({ homework: '📚', test: '📝', activity: '🎨', other: '✏️', school: '🏫' }[t] ?? '✏️');
   const statusIcon = (s: Task['status'], big = false) => {
     const size = big ? 30 : 24;
     if (s === 'done') return <CheckCircle2 size={size} color="#6BCB77" />;
@@ -509,7 +595,11 @@ export default function KidDashboard() {
                 const isToday = sameDay(day, today);
                 const doneCnt2 = dayTasks.filter(t => t.status === 'done').length;
                 return (
-                  <div key={i} className={`week-cal-col${isToday ? ' week-cal-today' : ''}`}>
+                  <div key={i}
+                    className={`week-cal-col${isToday ? ' week-cal-today' : ''}${dragOverDayIdx === i ? ' drag-over' : ''}`}
+                    onDragOver={e => { e.preventDefault(); setDragOverDayIdx(i); }}
+                    onDragLeave={() => setDragOverDayIdx(null)}
+                    onDrop={e => { e.preventDefault(); setDragOverDayIdx(null); if (dragTaskId.current !== null) moveTaskToDay(dragTaskId.current, day); }}>
                     <div className="week-cal-col-header" onClick={() => { setCurrentDate(day); setView('day'); }}>
                       <div className="week-cal-day-name">{HEBREW_DAYS[day.getDay()]}</div>
                       <div className={`week-cal-day-num${isToday ? ' today-num' : ''}`}>{day.getDate()}</div>
@@ -525,6 +615,9 @@ export default function KidDashboard() {
                           const uk = urgencyKey(task.due_date, task.status);
                           return (
                             <div key={task.id}
+                              draggable
+                              onDragStart={e => { e.dataTransfer.setData('text/plain', String(task.id)); dragTaskId.current = task.id; }}
+                              onDragEnd={() => { dragTaskId.current = null; setDragOverDayIdx(null); }}
                               className={`week-cal-card urgency-${uk}${task.status === 'done' ? ' wcc-done' : ''}${isTest(task) && task.status !== 'done' ? ' wcc-test' : ''}`}
                               onClick={() => toggleStatus(task)}>
                               <div className="wcc-top">
@@ -532,6 +625,7 @@ export default function KidDashboard() {
                                 <button className="wcc-edit" onClick={e => openEdit(task, e)}><Edit3 size={11} /></button>
                               </div>
                               <div className={`wcc-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</div>
+                              <div className="wcc-time">{getTaskTimeLabel(task.due_date)}</div>
                               {task.status !== 'done' && <div className={`wcc-chip chip-${uk}`}>{urgencyLabel[uk] ?? ''}</div>}
                             </div>
                           );
@@ -543,57 +637,90 @@ export default function KidDashboard() {
               })}
             </div>
           ) : (
-            /* ── DAY VIEW ── */
-            visibleTasks.length === 0 ? (
-              <div className="kid-empty">
-                <div className="kid-empty-emoji">🎉</div>
-                <div className="kid-empty-title">אין משימות!</div>
-                <div className="kid-empty-sub">כל הכבוד, אין לך משימות לתקופה זו</div>
-              </div>
-            ) : (
-              <div className="kid-task-list">
-                {visibleTasks.map(task => {
-                  const uk = urgencyKey(task.due_date, task.status);
-                  return (
-                    <div key={task.id} className={`kid-task urgency-${uk}${isTest(task) && uk !== 'done' ? ' is-test' : ''}`}
-                      onClick={() => toggleStatus(task)}>
-                      <div className="kid-task-left">
-                        <div className="kid-task-check">{statusIcon(task.status)}</div>
-                      </div>
-                      <div className="kid-task-body">
-                        <div className="kid-task-title-row">
-                          <span className="kid-task-emoji">{typeEmoji(task.type)}</span>
-                          <span className={`kid-task-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
-                          {uk !== 'done' && uk !== 'later' && (
-                            <span className={`urgency-chip chip-${uk}`}>{urgencyLabel[uk]}</span>
-                          )}
-                        </div>
-                        {task.description && <div className="kid-task-desc">{task.description}</div>}
-                        <div className="kid-task-footer">
-                          <span className="kid-task-reldate">{relativeDate(task.due_date)}</span>
-                        </div>
-                      </div>
-                      <div className="kid-task-actions">
-                        {task.status !== 'done' && (
-                          <button className="kid-focus-mini" onClick={e => openFocus(task, e)} title="התמקד">
-                            <Play size={13} />
-                          </button>
-                        )}
-                        <button className="kid-edit-btn" onClick={e => openEdit(task, e)} title="עריכה">
-                          <Edit3 size={14} />
-                        </button>
-                      </div>
+            /* ── DAY VIEW (TIME GRID) ── */
+            <div className="time-grid">
+              {visibleTasks.length === 0 && (
+                <div className="kid-empty">
+                  <div className="kid-empty-emoji">🎉</div>
+                  <div className="kid-empty-title">אין משימות!</div>
+                  <div className="kid-empty-sub">כל הכבוד, אין לך משימות לתקופה זו</div>
+                </div>
+              )}
+              {GRID_HOURS.map(hour => {
+                const hourTasks = sortByUrgency(visibleTasks.filter(t => getTaskHour(t.due_date) === hour));
+                const nowHour = new Date().getHours();
+                const isCurrentHour = sameDay(currentDate, today) && hour === nowHour;
+                return (
+                  <div key={hour}
+                    className={`time-row${hourTasks.some(t => t.type === 'school') ? ' school-hour' : ''}${hourTasks.length === 0 ? ' empty-hour' : ''}${isCurrentHour ? ' current-hour' : ''}`}>
+                    <div className="time-row-label">
+                      {String(hour).padStart(2, '0')}:00
+                      {isCurrentHour && <div className="now-dot" />}
                     </div>
-                  );
-                })}
-              </div>
-            )
+                    <div className="time-row-content">
+                      {hourTasks.map(task => {
+                        const uk = urgencyKey(task.due_date, task.status);
+                        return (
+                          <div key={task.id}
+                            className={`time-task urgency-${uk}${task.type === 'school' ? ' school-task' : ''}${isTest(task) && uk !== 'done' ? ' is-test' : ''}${task.status === 'done' ? ' tt-done' : ''}`}
+                            onClick={() => toggleStatus(task)}>
+                            <span className="time-task-emoji">{typeEmoji(task.type)}</span>
+                            <div className="time-task-body">
+                              <span className={`time-task-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
+                              <span className="time-task-time">{getTaskTimeLabel(task.due_date)}</span>
+                            </div>
+                            <div className="time-task-actions">
+                              {task.status !== 'done' && task.type !== 'school' && (
+                                <button className="tt-btn" onClick={e => openFocus(task, e)}><Play size={11} /></button>
+                              )}
+                              <button className="tt-btn" onClick={e => openEdit(task, e)}><Edit3 size={11} /></button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+              {/* Tasks outside grid hours */}
+              {(() => {
+                const out = sortByUrgency(visibleTasks.filter(t => !GRID_HOURS.includes(getTaskHour(t.due_date))));
+                if (!out.length) return null;
+                return (
+                  <div className="time-row">
+                    <div className="time-row-label">📌</div>
+                    <div className="time-row-content">
+                      {out.map(task => {
+                        const uk = urgencyKey(task.due_date, task.status);
+                        return (
+                          <div key={task.id}
+                            className={`time-task urgency-${uk}${task.status === 'done' ? ' tt-done' : ''}`}
+                            onClick={() => toggleStatus(task)}>
+                            <span className="time-task-emoji">{typeEmoji(task.type)}</span>
+                            <div className="time-task-body">
+                              <span className={`time-task-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
+                            </div>
+                            <div className="time-task-actions">
+                              {task.status !== 'done' && <button className="tt-btn" onClick={e => openFocus(task, e)}><Play size={11} /></button>}
+                              <button className="tt-btn" onClick={e => openEdit(task, e)}><Edit3 size={11} /></button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
           )}
         </div>
       </main>
 
       {/* ── FAB BAR ── */}
       <div className="kid-fab-bar">
+        <button className="kid-fab kid-fab-school" onClick={() => setShowSchoolModal(true)}>
+          <BookOpen size={22} /><span>מערכת</span>
+        </button>
         <button className="kid-fab kid-fab-chat" onClick={() => setShowChat(true)}>
           <Bot size={22} /><span>צ&apos;אט</span>
         </button>
@@ -698,6 +825,7 @@ export default function KidDashboard() {
                 <option value="homework">שיעורי בית 📚</option>
                 <option value="test">מבחן 📝</option>
                 <option value="activity">פעילות 🎨</option>
+                <option value="school">שיעור בבית ספר 🏫</option>
                 <option value="other">אחר ✏️</option>
               </select>
             </div>
@@ -746,6 +874,57 @@ export default function KidDashboard() {
               disabled={schedulerLoading || !studySessions.some(s => s.trim())}>
               <Zap size={18} style={{ marginLeft: 8 }} />
               {schedulerLoading ? 'יוצר...' : 'צור משימות לימוד'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── SCHOOL SCHEDULE ── */}
+      {showSchoolModal && (
+        <div className="modal-overlay" onClick={() => setShowSchoolModal(false)}>
+          <div className="modal-card modal-wide" onClick={e => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setShowSchoolModal(false)}><X size={20} /></button>
+            <div className="modal-header">
+              <div className="modal-icon" style={{ background: 'linear-gradient(135deg, #6C63FF, #A29BFE)' }}>
+                <BookOpen size={28} color="white" />
+              </div>
+              <h2 className="modal-title">טעינת מערכת שעות</h2>
+              <p className="modal-sub">הכנס את השיעורים שלך לשבוע הנוכחי — הם יסתמנו אוטומטית כשיסתיימו</p>
+            </div>
+            <div className="school-grid-wrap">
+              <table className="school-grid">
+                <thead>
+                  <tr>
+                    <th className="sg-th sg-time-col"></th>
+                    {SCHOOL_DAYS_HE.map((d, i) => <th key={i} className="sg-th">{d}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {SCHOOL_PERIODS.map(hour => (
+                    <tr key={hour}>
+                      <td className="sg-td sg-time-col">{String(hour).padStart(2, '0')}:00</td>
+                      {[0, 1, 2, 3, 4].map(dayIdx => {
+                        const key = `${dayIdx}-${hour}`;
+                        return (
+                          <td key={dayIdx} className="sg-td">
+                            <input
+                              type="text"
+                              className="sg-input"
+                              placeholder="—"
+                              value={schoolGrid[key] || ''}
+                              onChange={e => setSchoolGrid(prev => ({ ...prev, [key]: e.target.value }))}
+                            />
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <button className="btn-primary" style={{ marginTop: 20 }} onClick={submitSchoolSchedule}
+              disabled={schoolLoading || !Object.values(schoolGrid).some(v => v.trim())}>
+              {schoolLoading ? 'יוצר שיעורים...' : 'טען מערכת שעות ✅'}
             </button>
           </div>
         </div>
