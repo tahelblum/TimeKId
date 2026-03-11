@@ -22,6 +22,7 @@ export const API_ENDPOINTS = {
   },
   CHILD: {
     MY_TASKS: '/child/tasks',
+    CREATE_TASK: '/child/tasks',
     UPDATE_TASK: (id: number) => `/child/tasks/${id}`,
   },
   TASKS: {

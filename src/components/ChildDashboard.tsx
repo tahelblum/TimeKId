@@ -120,12 +120,12 @@ export default function ChildDashboard({ childId }: { childId: number }) {
   // ─── Data fetching ────────────────────────────────────────────────────────
   const fetchWeekData = useCallback(async (force = false) => {
     const days = weekDays(currentDate);
-    const key = toAPIDate(days[0]);
+    const key = dayStrOf(days[0]);
     const now = Date.now();
     if (!force && cacheRef.current?.weekKey === key && now - cacheRef.current.fetchedAt < CACHE_TTL) return;
     setTasksLoading(true);
     try {
-      const url = `${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}?start=${toAPIDate(days[0])}&end=${toAPIDate(days[6])}`;
+      const url = `${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}?start=${dayStrOf(days[0])}&end=${dayStrOf(days[6])}`;
       const res = await fetch(url, { headers: { 'Authorization': `Bearer ${authToken}` } });
       if (res.ok) {
         setWeekAllTasks(extractArray(await res.json()));
@@ -190,7 +190,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
       const res = await fetch(N8N_WEBHOOK, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg, child_id: childId, auth_token: authToken }) });
       const data = await res.json();
       setBotMessages(prev => [...prev, { role: 'bot', text: data.reply || 'המשימה נוצרה בהצלחה!' }]);
-      if (data.task_created) fetchWeekData(true);
+      fetchWeekData(true);
     } catch { setBotMessages(prev => [...prev, { role: 'bot', text: 'מצטער, אירעה שגיאה. נסה שוב.' }]); }
     finally { setBotLoading(false); }
   }
@@ -332,6 +332,34 @@ export default function ChildDashboard({ childId }: { childId: number }) {
                 return <div className="sc-now-line" style={{ top }} />;
               })()}
 
+              {/* Tasks outside grid hours — shown at top so they're always visible */}
+              {(() => {
+                const calDays = view === 'day' ? [currentDate] : wDays;
+                const out = weekAllTasks.filter(t =>
+                  calDays.some(d => sameDay(new Date(t.due_date * 1000), d)) &&
+                  !GRID_HOURS.includes(getTaskHour(t.due_date))
+                );
+                if (!out.length) return null;
+                return (
+                  <div className="sc-row sc-allday-row">
+                    <div className="sc-time-label">📌</div>
+                    <div className="sc-allday-tasks">
+                      {out.map(task => {
+                        const uk = urgencyKey(task.due_date, task.status);
+                        return (
+                          <div key={task.id}
+                            className={`sc-event ev-${task.type} urgency-${uk}${task.status === 'done' ? ' ev-done' : ''}`}
+                            onClick={() => toggleTaskStatus(task)}>
+                            <span className="ev-emoji">{TYPE_EMOJI[task.type] ?? '✏️'}</span>
+                            <span className={`ev-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {GRID_HOURS.map(hour => {
                 const calDays = view === 'day' ? [currentDate] : wDays;
                 return (
@@ -372,34 +400,6 @@ export default function ChildDashboard({ childId }: { childId: number }) {
                   </div>
                 );
               })}
-
-              {/* Tasks outside grid hours */}
-              {(() => {
-                const calDays = view === 'day' ? [currentDate] : wDays;
-                const out = weekAllTasks.filter(t =>
-                  calDays.some(d => sameDay(new Date(t.due_date * 1000), d)) &&
-                  !GRID_HOURS.includes(getTaskHour(t.due_date))
-                );
-                if (!out.length) return null;
-                return (
-                  <div className="sc-row sc-allday-row">
-                    <div className="sc-time-label">📌</div>
-                    <div className="sc-allday-tasks">
-                      {out.map(task => {
-                        const uk = urgencyKey(task.due_date, task.status);
-                        return (
-                          <div key={task.id}
-                            className={`sc-event ev-${task.type} urgency-${uk}${task.status === 'done' ? ' ev-done' : ''}`}
-                            onClick={() => toggleTaskStatus(task)}>
-                            <span className="ev-emoji">{TYPE_EMOJI[task.type] ?? '✏️'}</span>
-                            <span className={`ev-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })()}
 
               {weekAllTasks.filter(t => view === 'day' ? sameDay(new Date(t.due_date * 1000), currentDate) : true).length === 0 && (
                 <div className="sc-empty">

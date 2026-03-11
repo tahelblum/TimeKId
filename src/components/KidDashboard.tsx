@@ -223,12 +223,12 @@ export default function KidDashboard() {
   // ─── Data fetching (single cached fetch per week) ──────────────────────────
   const fetchWeekData = useCallback(async (force = false) => {
     const days = weekDays(currentDate);
-    const key = toAPIDate(days[0]);
+    const key = dayStrOf(days[0]);
     const now = Date.now();
     if (!force && cacheRef.current?.weekKey === key && now - cacheRef.current.fetchedAt < CACHE_TTL) return;
     setTasksLoading(true);
     try {
-      const url = `${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${toAPIDate(days[0])}&end=${toAPIDate(days[6])}`;
+      const url = `${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${dayStrOf(days[0])}&end=${dayStrOf(days[6])}`;
       const res = await fetch(url, { headers: { Authorization: `Bearer ${authToken}` } });
       if (res.ok) {
         const all: Task[] = extractArray(await res.json());
@@ -338,7 +338,7 @@ export default function KidDashboard() {
       });
       const data = await res.json();
       setChatMessages(prev => [...prev, { role: 'bot', text: data.reply || 'נוצרה משימה חדשה! ✅' }]);
-      if (data.task_created) fetchWeekData(true);
+      fetchWeekData(true);
     } catch {
       setChatMessages(prev => [...prev, { role: 'bot', text: 'אירעה שגיאה. נסה שוב.' }]);
     } finally { setChatLoading(false); }
@@ -393,10 +393,10 @@ export default function KidDashboard() {
       if (!targetDay) continue;
       const ts = tsFromDateAndHour(dayStrOf(targetDay), hour);
       try {
-        await fetch(`${API_URL}/Task`, {
+        await fetch(`${API_URL}${API_ENDPOINTS.CHILD.CREATE_TASK}`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: subject, type: 'school', status: 'pending', due_date: ts, child_id: child?.id }),
+          body: JSON.stringify({ title: subject, type: 'school', due_date: ts }),
         });
       } catch {}
     }
@@ -635,6 +635,35 @@ export default function KidDashboard() {
                   return <div className="sc-now-line" style={{ top }} />;
                 })()}
 
+                {/* Tasks outside grid hours — shown at top so they're always visible */}
+                {(() => {
+                  const calDays = view === 'day' ? [currentDate] : wDays;
+                  const out = weekAllTasks.filter(t =>
+                    calDays.some(d => sameDay(new Date(t.due_date * 1000), d)) &&
+                    !GRID_HOURS.includes(getTaskHour(t.due_date))
+                  );
+                  if (!out.length) return null;
+                  return (
+                    <div className="sc-row sc-allday-row">
+                      <div className="sc-time-label">📌</div>
+                      <div className="sc-allday-tasks">
+                        {sortByUrgency(out).map(task => {
+                          const uk = urgencyKey(task.due_date, task.status);
+                          return (
+                            <div key={task.id}
+                              className={`sc-event ev-${task.type} urgency-${uk}${task.status === 'done' ? ' ev-done' : ''}`}
+                              onClick={() => toggleStatus(task)}>
+                              <span className="ev-emoji">{typeEmoji(task.type)}</span>
+                              <span className={`ev-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
+                              <button className="ev-edit" onClick={e => openEdit(task, e)}><Edit3 size={10} /></button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {GRID_HOURS.map(hour => {
                   const calDays = view === 'day' ? [currentDate] : wDays;
                   return (
@@ -676,35 +705,6 @@ export default function KidDashboard() {
                     </div>
                   );
                 })}
-
-                {/* Tasks outside grid hours */}
-                {(() => {
-                  const calDays = view === 'day' ? [currentDate] : wDays;
-                  const out = weekAllTasks.filter(t =>
-                    calDays.some(d => sameDay(new Date(t.due_date * 1000), d)) &&
-                    !GRID_HOURS.includes(getTaskHour(t.due_date))
-                  );
-                  if (!out.length) return null;
-                  return (
-                    <div className="sc-row sc-allday-row">
-                      <div className="sc-time-label">📌</div>
-                      <div className="sc-allday-tasks">
-                        {sortByUrgency(out).map(task => {
-                          const uk = urgencyKey(task.due_date, task.status);
-                          return (
-                            <div key={task.id}
-                              className={`sc-event ev-${task.type} urgency-${uk}${task.status === 'done' ? ' ev-done' : ''}`}
-                              onClick={() => toggleStatus(task)}>
-                              <span className="ev-emoji">{typeEmoji(task.type)}</span>
-                              <span className={`ev-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
-                              <button className="ev-edit" onClick={e => openEdit(task, e)}><Edit3 size={10} /></button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
 
                 {weekAllTasks.filter(t => view === 'day' ? sameDay(new Date(t.due_date * 1000), currentDate) : true).length === 0 && (
                   <div className="sc-empty">
