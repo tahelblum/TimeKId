@@ -12,6 +12,7 @@ export default function CreateChildForm() {
   const router = useRouter();
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [grade, setGrade] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -27,7 +28,7 @@ export default function CreateChildForm() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${authToken}`,
         },
-        body: JSON.stringify({ name, username, grade }),
+        body: JSON.stringify({ name, username, password, grade }),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -75,6 +76,17 @@ export default function CreateChildForm() {
               onChange={e => setUsername(e.target.value)}
               required
               placeholder="username"
+            />
+          </div>
+          <div className="form-field">
+            <label>סיסמה</label>
+            <input
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
+              placeholder="סיסמה לכניסת הילד"
+              autoComplete="new-password"
             />
           </div>
           <div className="form-field">

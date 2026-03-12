@@ -364,16 +364,13 @@ export default function ChildDashboard({ childId }: { childId: number }) {
       .filter(t => t.due_date * 1000 >= now.getTime() && t.due_date * 1000 <= end.getTime())
       .map(t => ({ title: t.title, date: new Date(t.due_date * 1000).toISOString().split('T')[0], hour: new Date(t.due_date * 1000).getHours() }));
     try {
-      const res = await fetch(N8N_WEBHOOK, {
+      const res = await fetch('/api/study-planner', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'study_planner',
           test_title: test.title,
           test_date: testDate,
           busy_slots: busySlots,
-          child_id: childId,
-          auth_token: authToken,
         }),
       });
       const data = await res.json();
