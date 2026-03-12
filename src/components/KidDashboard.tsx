@@ -11,15 +11,20 @@ import {
 import { API_URL, API_ENDPOINTS } from '@/lib/api';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+const normalizeTasks = (arr: Task[]): Task[] => arr.map(t => ({
+  ...t,
+  due_date: t.due_date || (t.due_time ? Math.floor(new Date(t.due_time + 'T12:00:00').getTime() / 1000) : 0),
+}));
 const extractArray = (d: unknown): Task[] => {
-  if (Array.isArray(d)) return d;
-  if (d && typeof d === 'object') {
+  let arr: Task[] = [];
+  if (Array.isArray(d)) arr = d;
+  else if (d && typeof d === 'object') {
     const obj = d as Record<string, unknown>;
-    if (Array.isArray(obj.items)) return obj.items as Task[];
-    if (Array.isArray(obj.value)) return obj.value as Task[];
-    if (Array.isArray(obj.result)) return obj.result as Task[];
+    if (Array.isArray(obj.items)) arr = obj.items as Task[];
+    else if (Array.isArray(obj.value)) arr = obj.value as Task[];
+    else if (Array.isArray(obj.result)) arr = obj.result as Task[];
   }
-  return [];
+  return normalizeTasks(arr);
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -28,6 +33,7 @@ interface Task {
   title: string;
   description: string;
   due_date: number;
+  due_time?: string; // YYYY-MM-DD, fallback for old records where due_date is null
   status: 'pending' | 'in_progress' | 'done';
   type: 'homework' | 'test' | 'activity' | 'other' | 'school';
 }
