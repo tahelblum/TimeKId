@@ -23,7 +23,7 @@ import { useRouter } from 'next/navigation';
 import {
   ArrowRight, ChevronLeft, ChevronRight, Edit3,
   Bot, FileText, Star, Bell, UserPlus,
-  X, Send, Upload, Paperclip,
+  X, Send, Upload, Paperclip, BookOpen, Sparkles, ExternalLink,
 } from 'lucide-react';
 import { API_URL, API_ENDPOINTS } from '@/lib/api';
 
@@ -32,12 +32,67 @@ interface Task {
   title: string;
   description: string;
   due_date: number;
-  due_time?: string; // YYYY-MM-DD, fallback for old records where due_date is null
+  due_time?: string;
   status: 'pending' | 'in_progress' | 'done';
   type: 'homework' | 'test' | 'activity' | 'other' | 'school';
+  _virtual?: boolean;
+  _examId?: number;
+  _slotId?: number;
+}
+interface Exam {
+  id: number;
+  exam_date: string;
+  exam_time?: string;
+  notes?: string;
+  child_id?: number;
+  subjects_id?: number;
+}
+interface ScheduleSlot {
+  id: number;
+  day_of_week: string;
+  Subject: string;
+  start_time: string;
+  endtime: string;
+  children_id: number;
+  subjects_id?: number;
+}
+
+const DAY_OF_WEEK_NUM: Record<string, number> = {
+  Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6,
+};
+function parseTimeHour(t: string): number { return parseInt((t || '12').split(':')[0]) || 12; }
+function toAnyArray(d: unknown): unknown[] {
+  if (Array.isArray(d)) return d;
+  if (d && typeof d === 'object') {
+    const o = d as Record<string, unknown>;
+    return Array.isArray(o.items) ? o.items : Array.isArray(o.value) ? o.value : Array.isArray(o.result) ? o.result : [];
+  }
+  return [];
+}
+function examToTask(exam: Exam, days: Date[]): Task | null {
+  if (!exam.exam_date) return null;
+  const hour = exam.exam_time ? parseTimeHour(exam.exam_time) : 12;
+  const due_date = tsFromDateAndHour(exam.exam_date, hour);
+  return { id: -(exam.id * 1000 + 500), title: exam.notes || 'מבחן', description: exam.notes || '',
+    due_date, status: 'pending', type: 'test', _virtual: true, _examId: exam.id };
+}
+function slotToTask(slot: ScheduleSlot, days: Date[]): Task | null {
+  const dayNum = DAY_OF_WEEK_NUM[slot.day_of_week];
+  if (dayNum === undefined) return null;
+  const date = days.find(d => d.getDay() === dayNum);
+  if (!date) return null;
+  const hour = parseTimeHour(slot.start_time);
+  const due_date = tsFromDateAndHour(dayStrOf(date), hour);
+  const now = Math.floor(Date.now() / 1000);
+  return { id: -(slot.id * 1000), title: slot.Subject, description: '',
+    due_date, status: due_date < now ? 'done' : 'pending', type: 'school',
+    _virtual: true, _slotId: slot.id };
 }
 interface Child { id: number; name: string; username: string; grade: string; }
 interface ChatMessage { role: 'user' | 'bot'; text: string; }
+interface StudySession { title: string; date: string; hour: number; }
+interface PracticeLink { title: string; url: string; }
+interface StudyPlan { reply: string; study_sessions?: StudySession[]; practice_links?: PracticeLink[]; }
 
 const HEBREW_DAYS   = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 const HEBREW_MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
@@ -94,7 +149,12 @@ export default function ChildDashboard({ childId }: { childId: number }) {
   const cacheRef = useRef<{ weekKey: string; fetchedAt: number } | null>(null);
   const calBodyRef = useRef<HTMLDivElement>(null);
 
-  const [activeModal, setActiveModal] = useState<null | 'bot' | 'document' | 'compliment' | 'reminder' | 'secondary'>(null);
+  const [activeModal, setActiveModal] = useState<null | 'bot' | 'document' | 'compliment' | 'reminder' | 'secondary' | 'study-planner'>(null);
+  const [upcomingTests, setUpcomingTests] = useState<Task[]>([]);
+  const [selectedTest, setSelectedTest] = useState<Task | null>(null);
+  const [studyPlan, setStudyPlan] = useState<StudyPlan | null>(null);
+  const [studyPlanLoading, setStudyPlanLoading] = useState(false);
+  const [studyPlanConfirmed, setStudyPlanConfirmed] = useState(false);
 
   // Bot
   const [botMessages, setBotMessages] = useState<ChatMessage[]>([
@@ -123,20 +183,29 @@ export default function ChildDashboard({ childId }: { childId: number }) {
   const wDays = weekDays(currentDate);
   const today = new Date();
 
-  // ─── Data fetching ────────────────────────────────────────────────────────
+  // ─── Data fetching — tasks + exams + schedule slots ───────────────────────
   const fetchWeekData = useCallback(async (force = false) => {
     const days = weekDays(currentDate);
     const key = dayStrOf(days[0]);
     const now = Date.now();
     if (!force && cacheRef.current?.weekKey === key && now - cacheRef.current.fetchedAt < CACHE_TTL) return;
     setTasksLoading(true);
+    const auth = { 'Authorization': `Bearer ${authToken}` };
+    const start = dayStrOf(days[0]); const end = dayStrOf(days[6]);
     try {
-      const url = `${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}?start=${dayStrOf(days[0])}&end=${dayStrOf(days[6])}`;
-      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${authToken}` } });
-      if (res.ok) {
-        setWeekAllTasks(extractArray(await res.json()));
-        cacheRef.current = { weekKey: key, fetchedAt: now };
-      } else { setWeekAllTasks([]); }
+      const [tasksRes, examsRes, slotsRes] = await Promise.all([
+        fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}?start=${start}&end=${end}`, { headers: auth }),
+        fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.EXAMS(childId)}?start=${start}&end=${end}`, { headers: auth }).catch(() => null),
+        fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.SCHEDULE(childId)}`, { headers: auth }).catch(() => null),
+      ]);
+      const realTasks: Task[] = tasksRes.ok ? extractArray(await tasksRes.json()) : [];
+      const examTasks: Task[] = examsRes?.ok
+        ? (toAnyArray(await examsRes.json()) as Exam[]).flatMap(e => { const t = examToTask(e, days); return t ? [t] : []; })
+        : [];
+      const slots: ScheduleSlot[] = slotsRes?.ok ? (toAnyArray(await slotsRes.json()) as ScheduleSlot[]) : [];
+      const slotTasks: Task[] = slots.flatMap(s => { const t = slotToTask(s, days); return t ? [t] : []; });
+      setWeekAllTasks([...realTasks, ...examTasks, ...slotTasks]);
+      cacheRef.current = { weekKey: key, fetchedAt: now };
     } catch { setWeekAllTasks([]); } finally { setTasksLoading(false); }
   }, [currentDate, childId, authToken]);
 
@@ -157,8 +226,30 @@ export default function ChildDashboard({ childId }: { childId: number }) {
   }
   useEffect(() => { fetchChild(); }, [childId]);
 
+  // ─── Upcoming tests (next 7 days) ─────────────────────────────────────────
+  useEffect(() => {
+    async function fetchUpcomingTests() {
+      const now = new Date(); now.setHours(0, 0, 0, 0);
+      const end = new Date(now); end.setDate(end.getDate() + 7);
+      const start = toAPIDate(now);
+      const endStr = toAPIDate(end);
+      try {
+        const res = await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}?start=${start}&end=${endStr}`, {
+          headers: { 'Authorization': `Bearer ${authToken}` },
+        });
+        if (!res.ok) return;
+        const all = extractArray(await res.json());
+        const isTestTask = (t: Task) =>
+          t.type === 'test' || /מבחן|בוחן|טסט|בחינה/.test(t.title);
+        setUpcomingTests(all.filter(isTestTask).sort((a, b) => a.due_date - b.due_date));
+      } catch {}
+    }
+    fetchUpcomingTests();
+  }, [childId, authToken]);
+
   // ─── Actions ──────────────────────────────────────────────────────────────
   async function toggleTaskStatus(task: Task) {
+    if (task._virtual) return;
     const next: Task['status'] = task.status === 'pending' ? 'in_progress' : task.status === 'in_progress' ? 'done' : 'pending';
     setWeekAllTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: next } : t));
     try {
@@ -172,7 +263,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
 
   async function moveTaskToDayHour(taskId: number, targetDay: Date, hour: number) {
     const task = weekAllTasks.find(t => t.id === taskId);
-    if (!task) return;
+    if (!task || task._virtual) return;
     const mins = new Date(task.due_date * 1000).getMinutes();
     const newTs = tsFromDateAndHour(dayStrOf(targetDay), hour) + mins * 60;
     setWeekAllTasks(prev => prev.map(t => t.id === taskId ? { ...t, due_date: newTs } : t));
@@ -258,6 +349,63 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     } catch { setActionSuccess(''); } finally { setActionLoading(false); }
   }
 
+  async function openStudyPlanner(test: Task) {
+    setSelectedTest(test);
+    setStudyPlan(null);
+    setStudyPlanConfirmed(false);
+    setActiveModal('study-planner');
+    setStudyPlanLoading(true);
+    const testDate = new Date(test.due_date * 1000).toISOString().split('T')[0];
+    // Collect existing tasks for the next 7 days so LLM can avoid busy slots
+    const now = new Date(); now.setHours(0, 0, 0, 0);
+    const end = new Date(now); end.setDate(end.getDate() + 7);
+    const busySlots = upcomingTests
+      .concat(weekAllTasks)
+      .filter(t => t.due_date * 1000 >= now.getTime() && t.due_date * 1000 <= end.getTime())
+      .map(t => ({ title: t.title, date: new Date(t.due_date * 1000).toISOString().split('T')[0], hour: new Date(t.due_date * 1000).getHours() }));
+    try {
+      const res = await fetch(N8N_WEBHOOK, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'study_planner',
+          test_title: test.title,
+          test_date: testDate,
+          busy_slots: busySlots,
+          child_id: childId,
+          auth_token: authToken,
+        }),
+      });
+      const data = await res.json();
+      setStudyPlan(data);
+    } catch {
+      setStudyPlan({ reply: 'שגיאה בקבלת תכנית לימוד. נסה שוב.' });
+    } finally {
+      setStudyPlanLoading(false);
+    }
+  }
+
+  async function confirmStudyPlan() {
+    if (!studyPlan?.study_sessions?.length || !selectedTest) return;
+    setStudyPlanLoading(true);
+    try {
+      for (const session of studyPlan.study_sessions) {
+        const due_date = tsFromDateAndHour(session.date, session.hour);
+        await fetch(N8N_WEBHOOK, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: `צור משימת לימוד: "${session.title}" בתאריך ${session.date} בשעה ${session.hour}:00`,
+            child_id: childId,
+            auth_token: authToken,
+          }),
+        });
+      }
+      setStudyPlanConfirmed(true);
+      fetchWeekData(true);
+    } catch {} finally { setStudyPlanLoading(false); }
+  }
+
   function closeModal() { setActiveModal(null); setActionSuccess(''); setActionLoading(false); }
 
   const navDate = (delta: number) => setCurrentDate(prev => { const d = new Date(prev); d.setDate(d.getDate() + delta); return d; });
@@ -302,6 +450,36 @@ export default function ChildDashboard({ childId }: { childId: number }) {
           </div>
           <button className="btn-today" onClick={() => { const d = new Date(); d.setHours(0, 0, 0, 0); setCurrentDate(d); }}>היום</button>
         </div>
+
+        {/* ── UPCOMING TESTS BANNER ── */}
+        {upcomingTests.length > 0 && (
+          <div className="upcoming-tests-banner">
+            <div className="upcoming-tests-title">
+              <BookOpen size={18} />
+              מבחנים קרובים בשבוע הקרוב
+            </div>
+            {upcomingTests.map(test => {
+              const daysLeft = Math.ceil((test.due_date * 1000 - Date.now()) / 86400000);
+              const testDate = new Date(test.due_date * 1000);
+              return (
+                <div key={test.id} className="upcoming-test-row">
+                  <div className="upcoming-test-info">
+                    <span className="upcoming-test-name">📝 {test.title}</span>
+                    <span className="upcoming-test-date">
+                      {HEBREW_DAYS[testDate.getDay()]}, {testDate.getDate()} {HEBREW_MONTHS[testDate.getMonth()]}
+                      {' · '}
+                      <strong>{daysLeft === 0 ? 'היום!' : daysLeft === 1 ? 'מחר' : `בעוד ${daysLeft} ימים`}</strong>
+                    </span>
+                  </div>
+                  <button className="btn-study-plan" onClick={() => openStudyPlanner(test)}>
+                    <Sparkles size={15} />
+                    תכנן לימוד
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* ── SMART CALENDAR ── */}
         {tasksLoading ? (
@@ -560,6 +738,69 @@ export default function ChildDashboard({ childId }: { childId: number }) {
                     </button>
                   </>
                 )}
+              </>
+            )}
+
+            {/* Study Planner */}
+            {activeModal === 'study-planner' && selectedTest && (
+              <>
+                <div className="modal-header">
+                  <div className="modal-icon" style={{ background: 'linear-gradient(135deg, #6C63FF, #74B9FF)' }}>
+                    <Sparkles size={28} color="white" />
+                  </div>
+                  <h2 className="modal-title">תכנית לימוד חכמה</h2>
+                  <p className="modal-sub">{selectedTest.title}</p>
+                </div>
+                {studyPlanConfirmed ? (
+                  <div className="success-box">תכנית הלימוד נוספה ללוח הזמנים! 🎉</div>
+                ) : studyPlanLoading ? (
+                  <div className="study-plan-loading">
+                    <div className="spinner" />
+                    <p>מנתח זמינות וחיפוש תרגולים... ✨</p>
+                  </div>
+                ) : studyPlan ? (
+                  <>
+                    <div className="study-plan-reply">{studyPlan.reply}</div>
+
+                    {studyPlan.study_sessions && studyPlan.study_sessions.length > 0 && (
+                      <div className="study-sessions-list">
+                        <div className="study-sessions-title">סשנים מומלצים:</div>
+                        {studyPlan.study_sessions.map((s, i) => {
+                          const d = new Date(`${s.date}T${String(s.hour).padStart(2, '0')}:00:00`);
+                          return (
+                            <div key={i} className="study-session-row">
+                              <span className="study-session-icon">📅</span>
+                              <div>
+                                <div className="study-session-title">{s.title}</div>
+                                <div className="study-session-time">
+                                  {HEBREW_DAYS[d.getDay()]}, {d.getDate()} {HEBREW_MONTHS[d.getMonth()]} · {String(s.hour).padStart(2, '0')}:00
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {studyPlan.practice_links && studyPlan.practice_links.length > 0 && (
+                      <div className="practice-links-list">
+                        <div className="study-sessions-title">תרגולים מהרשת:</div>
+                        {studyPlan.practice_links.map((link, i) => (
+                          <a key={i} href={link.url} target="_blank" rel="noopener noreferrer" className="practice-link-row">
+                            <ExternalLink size={14} />
+                            {link.title}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+
+                    {studyPlan.study_sessions && studyPlan.study_sessions.length > 0 && (
+                      <button className="btn-primary" onClick={confirmStudyPlan} disabled={studyPlanLoading}>
+                        הוסף ללוח הזמנים
+                      </button>
+                    )}
+                  </>
+                ) : null}
               </>
             )}
 

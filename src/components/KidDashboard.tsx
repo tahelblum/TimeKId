@@ -36,8 +36,62 @@ interface Task {
   due_time?: string; // YYYY-MM-DD, fallback for old records where due_date is null
   status: 'pending' | 'in_progress' | 'done';
   type: 'homework' | 'test' | 'activity' | 'other' | 'school';
+  _virtual?: boolean;  // true = display-only (schedule slot / exam), no PATCH
+  _examId?: number;
+  _slotId?: number;
+}
+interface Exam {
+  id: number;
+  exam_date: string;   // YYYY-MM-DD
+  exam_time?: string;  // HH:MM
+  notes?: string;
+  child_id?: number;
+  subjects_id?: number;
+}
+interface ScheduleSlot {
+  id: number;
+  day_of_week: string; // 'Sunday' | 'Monday' | ...
+  Subject: string;
+  start_time: string;  // HH:MM
+  endtime: string;     // HH:MM
+  children_id: number;
+  subjects_id?: number;
 }
 interface ChatMessage { role: 'user' | 'bot'; text: string; }
+
+// ─── Multi-source calendar helpers ────────────────────────────────────────────
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const DAY_OF_WEEK_NUM: Record<string, number> = {
+  Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6,
+};
+function parseTimeHour(t: string): number { return parseInt((t || '12').split(':')[0]) || 12; }
+function toAnyArray(d: unknown): unknown[] {
+  if (Array.isArray(d)) return d;
+  if (d && typeof d === 'object') {
+    const o = d as Record<string, unknown>;
+    return (Array.isArray(o.items) ? o.items : Array.isArray(o.value) ? o.value : Array.isArray(o.result) ? o.result : []);
+  }
+  return [];
+}
+function examToTask(exam: Exam, days: Date[]): Task | null {
+  if (!exam.exam_date) return null;
+  const hour = exam.exam_time ? parseTimeHour(exam.exam_time) : 12;
+  const due_date = tsFromDateAndHour(exam.exam_date, hour);
+  return { id: -(exam.id * 1000 + 500), title: exam.notes || 'מבחן', description: exam.notes || '',
+    due_date, status: 'pending', type: 'test', _virtual: true, _examId: exam.id };
+}
+function slotToTask(slot: ScheduleSlot, days: Date[]): Task | null {
+  const dayNum = DAY_OF_WEEK_NUM[slot.day_of_week];
+  if (dayNum === undefined) return null;
+  const date = days.find(d => d.getDay() === dayNum);
+  if (!date) return null;
+  const hour = parseTimeHour(slot.start_time);
+  const due_date = tsFromDateAndHour(dayStrOf(date), hour);
+  const now = Math.floor(Date.now() / 1000);
+  return { id: -(slot.id * 1000), title: slot.Subject, description: '',
+    due_date, status: due_date < now ? 'done' : 'pending', type: 'school',
+    _virtual: true, _slotId: slot.id };
+}
 
 // ─── Calendar / school constants ──────────────────────────────────────────────
 const GRID_HOURS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
@@ -159,6 +213,8 @@ export default function KidDashboard() {
 
   // Single source of truth — all tasks for the currently viewed week
   const [weekAllTasks, setWeekAllTasks] = useState<Task[]>([]);
+  // Schedule slots (recurring weekly) — stored separately for modal pre-population
+  const [scheduleSlots, setScheduleSlots] = useState<ScheduleSlot[]>([]);
 
   // Cache tracking
   const cacheRef = useRef<{ weekKey: string; fetchedAt: number } | null>(null);
@@ -226,21 +282,29 @@ export default function KidDashboard() {
   const calBodyRef = useRef<HTMLDivElement>(null);
   const ROW_HEIGHT = 56;
 
-  // ─── Data fetching (single cached fetch per week) ──────────────────────────
+  // ─── Data fetching — tasks + exams + schedule slots ───────────────────────
   const fetchWeekData = useCallback(async (force = false) => {
     const days = weekDays(currentDate);
     const key = dayStrOf(days[0]);
     const now = Date.now();
     if (!force && cacheRef.current?.weekKey === key && now - cacheRef.current.fetchedAt < CACHE_TTL) return;
     setTasksLoading(true);
+    const auth = { Authorization: `Bearer ${authToken}` };
     try {
-      const url = `${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${dayStrOf(days[0])}&end=${dayStrOf(days[6])}`;
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${authToken}` } });
-      if (res.ok) {
-        const all: Task[] = extractArray(await res.json());
-        setWeekAllTasks(all);
-        cacheRef.current = { weekKey: key, fetchedAt: now };
-      }
+      const [tasksRes, examsRes, slotsRes] = await Promise.all([
+        fetch(`${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${dayStrOf(days[0])}&end=${dayStrOf(days[6])}`, { headers: auth }),
+        fetch(`${API_URL}${API_ENDPOINTS.CHILD.EXAMS}?start=${dayStrOf(days[0])}&end=${dayStrOf(days[6])}`, { headers: auth }).catch(() => null),
+        fetch(`${API_URL}${API_ENDPOINTS.CHILD.SCHEDULE}`, { headers: auth }).catch(() => null),
+      ]);
+      const realTasks: Task[] = tasksRes.ok ? extractArray(await tasksRes.json()) : [];
+      const examTasks: Task[] = examsRes?.ok
+        ? (toAnyArray(await examsRes.json()) as Exam[]).flatMap(e => { const t = examToTask(e, days); return t ? [t] : []; })
+        : [];
+      const slots: ScheduleSlot[] = slotsRes?.ok ? (toAnyArray(await slotsRes.json()) as ScheduleSlot[]) : [];
+      setScheduleSlots(slots);
+      const slotTasks: Task[] = slots.flatMap(s => { const t = slotToTask(s, days); return t ? [t] : []; });
+      setWeekAllTasks([...realTasks, ...examTasks, ...slotTasks]);
+      cacheRef.current = { weekKey: key, fetchedAt: now };
     } catch {} finally { setTasksLoading(false); }
   }, [currentDate, authToken]);
 
@@ -258,7 +322,7 @@ export default function KidDashboard() {
     const autoComplete = () => {
       const now = Math.floor(Date.now() / 1000);
       setWeekAllTasks(prev => {
-        const toComplete = prev.filter(t => t.type === 'school' && t.status !== 'done' && t.due_date < now);
+        const toComplete = prev.filter(t => t.type === 'school' && !t._virtual && t.status !== 'done' && t.due_date < now);
         if (!toComplete.length) return prev;
         toComplete.forEach(task => {
           fetch(`${API_URL}${API_ENDPOINTS.CHILD.UPDATE_TASK(task.id)}`, {
@@ -277,6 +341,7 @@ export default function KidDashboard() {
 
   // ─── Actions ───────────────────────────────────────────────────────────────
   async function toggleStatus(task: Task) {
+    if (task._virtual) return;
     const next: Task['status'] = task.status === 'pending' ? 'in_progress' : task.status === 'in_progress' ? 'done' : 'pending';
     setWeekAllTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: next } : t));
     if (next === 'done') {
@@ -313,6 +378,7 @@ export default function KidDashboard() {
 
   function openEdit(task: Task, e: React.MouseEvent) {
     e.stopPropagation();
+    if (task._virtual) return;
     setEditTask(task);
     setEditForm({ title: task.title, description: task.description, due_date: dateStrFromTs(task.due_date), type: task.type });
   }
@@ -374,7 +440,7 @@ export default function KidDashboard() {
 
   async function moveTaskToDayHour(taskId: number, targetDay: Date, hour: number) {
     const task = weekAllTasks.find(t => t.id === taskId);
-    if (!task) return;
+    if (!task || task._virtual) return;
     const mins = new Date(task.due_date * 1000).getMinutes();
     const newTs = tsFromDateAndHour(dayStrOf(targetDay), hour) + mins * 60;
     setWeekAllTasks(prev => prev.map(t => t.id === taskId ? { ...t, due_date: newTs } : t));
@@ -387,25 +453,48 @@ export default function KidDashboard() {
     } catch {}
   }
 
+  async function openSchoolModal() {
+    // Pre-populate grid from existing schedule slots
+    const grid: Record<string, string> = {};
+    scheduleSlots.forEach(slot => {
+      const dayNum = DAY_OF_WEEK_NUM[slot.day_of_week];
+      if (dayNum !== undefined && dayNum <= 4) {
+        const hour = parseTimeHour(slot.start_time);
+        if (SCHOOL_PERIODS.includes(hour)) grid[`${dayNum}-${hour}`] = slot.Subject;
+      }
+    });
+    setSchoolGrid(grid);
+    setShowSchoolModal(true);
+  }
+
   async function submitSchoolSchedule() {
     const entries = Object.entries(schoolGrid).filter(([, v]) => v.trim());
-    if (!entries.length) return;
     setSchoolLoading(true);
+    const auth = { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' };
+    // Delete all existing slots
+    await Promise.all(scheduleSlots.map(s =>
+      fetch(`${API_URL}${API_ENDPOINTS.CHILD.DELETE_SCHEDULE(s.id)}`, { method: 'DELETE', headers: auth }).catch(() => {})
+    ));
+    // Create new slots
+    const created: ScheduleSlot[] = [];
     for (const [key, subject] of entries) {
       const [dayIdxStr, hourStr] = key.split('-');
       const dayIdx = parseInt(dayIdxStr);
       const hour = parseInt(hourStr);
-      const targetDay = wDays[dayIdx];
-      if (!targetDay) continue;
-      const ts = tsFromDateAndHour(dayStrOf(targetDay), hour);
       try {
-        await fetch(`${API_URL}${API_ENDPOINTS.CHILD.CREATE_TASK}`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: subject, type: 'school', due_date: ts }),
+        const res = await fetch(`${API_URL}${API_ENDPOINTS.CHILD.SCHEDULE}`, {
+          method: 'POST', headers: auth,
+          body: JSON.stringify({
+            day_of_week: DAY_NAMES[dayIdx],
+            Subject: subject,
+            start_time: `${String(hour).padStart(2, '0')}:00`,
+            endtime: `${String(hour + 1).padStart(2, '0')}:00`,
+          }),
         });
+        if (res.ok) created.push(await res.json());
       } catch {}
     }
+    setScheduleSlots(created);
     setSchoolLoading(false);
     setShowSchoolModal(false);
     setSchoolGrid({});
@@ -726,7 +815,7 @@ export default function KidDashboard() {
 
       {/* ── FAB BAR ── */}
       <div className="kid-fab-bar">
-        <button className="kid-fab kid-fab-school" onClick={() => setShowSchoolModal(true)}>
+        <button className="kid-fab kid-fab-school" onClick={openSchoolModal}>
           <BookOpen size={22} /><span>מערכת</span>
         </button>
         <button className="kid-fab kid-fab-chat" onClick={() => setShowChat(true)}>
