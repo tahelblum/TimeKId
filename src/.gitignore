@@ -1,0 +1,14 @@
+# env files — never commit these
+.env
+.env.local
+.env*.local
+
+# Next.js
+.next/
+out/
+
+# dependencies
+node_modules/
+
+# build
+tsconfig.tsbuildinfo
