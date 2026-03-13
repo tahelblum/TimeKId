@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const XANO_META  = 'https://x8ki-letl-twmt.n7.xano.io';
-const XANO_API   = `${XANO_META}/api:UgeJ6dlR`;
-const TABLE_ID   = 714667; // schedule_slots
+const XANO_META = 'https://x8ki-letl-twmt.n7.xano.io';
+const TABLE_ID  = 714667; // schedule_slots
 
 async function fetchAllSlots(metaToken: string): Promise<unknown[]> {
   const items: unknown[] = [];
@@ -13,7 +12,7 @@ async function fetchAllSlots(metaToken: string): Promise<unknown[]> {
       { headers: { Authorization: `Bearer ${metaToken}` } }
     );
     if (!res.ok) break;
-    const data = await res.json() as { items?: unknown[]; curPage?: number; nextPage?: number | null } | unknown[];
+    const data = await res.json() as { items?: unknown[]; nextPage?: number | null } | unknown[];
     const batch = Array.isArray(data) ? data : ((data as { items?: unknown[] }).items ?? []);
     items.push(...batch);
     const next = Array.isArray(data) ? null : (data as { nextPage?: number | null }).nextPage;
@@ -23,28 +22,22 @@ async function fetchAllSlots(metaToken: string): Promise<unknown[]> {
   return items;
 }
 
-// GET /api/schedule — child app: returns schedule slots for the authenticated child
+// GET /api/schedule?childId=N — child app
+// childId comes from the client (child knows their own id from the auth context)
 export async function GET(req: NextRequest) {
   const metaToken = process.env.XANO_META_TOKEN;
-  if (!metaToken) return NextResponse.json([], { status: 200 });
-
-  const authHeader = req.headers.get('authorization') ?? '';
-
-  // Validate child token + get child ID
-  const meRes = await fetch(`${XANO_API}/auth/child-me`, {
-    headers: { Authorization: authHeader },
-  }).catch(() => null);
-
-  if (!meRes?.ok) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!metaToken) {
+    console.error('[/api/schedule] XANO_META_TOKEN not set');
+    return NextResponse.json([], { status: 200 });
   }
-  const me = await meRes.json() as { id?: number };
-  const childId = me?.id;
-  if (!childId) return NextResponse.json([], { status: 200 });
+
+  const childId = Number(req.nextUrl.searchParams.get('childId'));
+  if (!childId) return NextResponse.json({ error: 'childId required' }, { status: 400 });
 
   const allSlots = await fetchAllSlots(metaToken);
   const filtered = allSlots.filter(
     (s) => (s as Record<string, unknown>).user_id === childId
   );
+  console.log(`[/api/schedule] childId=${childId} → ${filtered.length}/${allSlots.length} slots`);
   return NextResponse.json(filtered);
 }

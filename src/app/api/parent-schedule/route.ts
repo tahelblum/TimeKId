@@ -13,7 +13,7 @@ async function fetchAllSlots(metaToken: string): Promise<unknown[]> {
       { headers: { Authorization: `Bearer ${metaToken}` } }
     );
     if (!res.ok) break;
-    const data = await res.json() as { items?: unknown[]; curPage?: number; nextPage?: number | null } | unknown[];
+    const data = await res.json() as { items?: unknown[]; nextPage?: number | null } | unknown[];
     const batch = Array.isArray(data) ? data : ((data as { items?: unknown[] }).items ?? []);
     items.push(...batch);
     const next = Array.isArray(data) ? null : (data as { nextPage?: number | null }).nextPage;
@@ -26,7 +26,10 @@ async function fetchAllSlots(metaToken: string): Promise<unknown[]> {
 // GET /api/parent-schedule?childId=N — parent app
 export async function GET(req: NextRequest) {
   const metaToken = process.env.XANO_META_TOKEN;
-  if (!metaToken) return NextResponse.json([], { status: 200 });
+  if (!metaToken) {
+    console.error('[/api/parent-schedule] XANO_META_TOKEN not set');
+    return NextResponse.json([], { status: 200 });
+  }
 
   const authHeader = req.headers.get('authorization') ?? '';
   const childId    = Number(req.nextUrl.searchParams.get('childId'));
@@ -45,5 +48,6 @@ export async function GET(req: NextRequest) {
   const filtered = allSlots.filter(
     (s) => (s as Record<string, unknown>).children_id === childId
   );
+  console.log(`[/api/parent-schedule] childId=${childId} → ${filtered.length}/${allSlots.length} slots`);
   return NextResponse.json(filtered);
 }
