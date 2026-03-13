@@ -386,18 +386,18 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     if (!studyPlan?.study_sessions?.length || !selectedTest) return;
     setStudyPlanLoading(true);
     try {
-      for (const session of studyPlan.study_sessions) {
-        const due_date = tsFromDateAndHour(session.date, session.hour);
-        await fetch(N8N_WEBHOOK, {
+      await Promise.all(studyPlan.study_sessions.map(session =>
+        fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            message: `צור משימת לימוד: "${session.title}" בתאריך ${session.date} בשעה ${session.hour}:00`,
-            child_id: childId,
-            auth_token: authToken,
+            title: session.title,
+            type: 'homework',
+            status: 'pending',
+            due_date: tsFromDateAndHour(session.date, session.hour),
           }),
-        });
-      }
+        })
+      ));
       setStudyPlanConfirmed(true);
       fetchWeekData(true);
     } catch {} finally { setStudyPlanLoading(false); }
