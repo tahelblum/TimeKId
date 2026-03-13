@@ -207,7 +207,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
       const [tasksRes, examsRes, slotsRes] = await Promise.all([
         fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}?start=${start}&end=${end}`, { headers: auth }),
         fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.EXAMS(childId)}?start=${start}&end=${end}`, { headers: auth }).catch(() => null),
-        fetch(`/api/parent-schedule?childId=${childId}`, { headers: auth }).catch(() => null),
+        fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.SCHEDULE(childId)}`, { headers: auth }).catch(() => null),
       ]);
       const realTasks: Task[] = tasksRes.ok ? extractArray(await tasksRes.json()) : [];
       const examTasks: Task[] = examsRes?.ok

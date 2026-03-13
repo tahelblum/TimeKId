@@ -305,7 +305,7 @@ export default function KidDashboard() {
       const [tasksRes, examsRes, slotsRes] = await Promise.all([
         fetch(`${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${dayStrOf(days[0])}&end=${dayStrOf(days[6])}`, { headers: auth }),
         fetch(`${API_URL}${API_ENDPOINTS.CHILD.EXAMS}?start=${dayStrOf(days[0])}&end=${dayStrOf(days[6])}`, { headers: auth }).catch(() => null),
-        fetch(`/api/schedule?childId=${child?.id ?? 0}`, { headers: auth }).catch(() => null),
+        fetch(`${API_URL}${API_ENDPOINTS.CHILD.SCHEDULE}`, { headers: auth }).catch(() => null),
       ]);
       const realTasks: Task[] = tasksRes.ok ? extractArray(await tasksRes.json()) : [];
       const examTasks: Task[] = examsRes?.ok
