@@ -50,11 +50,18 @@ interface Exam {
 }
 interface ScheduleSlot {
   id: number;
-  day_of_week: string; // 'Sunday' | 'Monday' | ...
-  Subject: string;
-  start_time: string;  // HH:MM
-  endtime: string;     // HH:MM
-  children_id: number;
+  // Xano field name variants (defensive — exact name depends on API version)
+  day_of_week?: string;
+  dayofweek?: string;
+  day?: string;
+  Subject?: string;
+  subject?: string;
+  start_time?: string;
+  startTime?: string;
+  endtime?: string;
+  end_time?: string;
+  endTime?: string;
+  children_id?: number;
   subjects_id?: number;
 }
 interface ChatMessage { role: 'user' | 'bot'; text: string; }
@@ -81,14 +88,18 @@ function examToTask(exam: Exam, days: Date[]): Task | null {
     due_date, status: 'pending', type: 'test', _virtual: true, _examId: exam.id };
 }
 function slotToTask(slot: ScheduleSlot, days: Date[]): Task | null {
-  const dayNum = DAY_OF_WEEK_NUM[slot.day_of_week];
+  const dayOfWeek = slot.day_of_week || slot.dayofweek || slot.day || '';
+  const subject   = slot.Subject || slot.subject || 'שיעור';
+  const startTime = slot.start_time || slot.startTime || '';
+  console.log('[schedule slot raw]', slot, '→', { dayOfWeek, subject, startTime });
+  const dayNum = DAY_OF_WEEK_NUM[dayOfWeek];
   if (dayNum === undefined) return null;
   const date = days.find(d => d.getDay() === dayNum);
   if (!date) return null;
-  const hour = parseTimeHour(slot.start_time);
+  const hour = parseTimeHour(startTime);
   const due_date = tsFromDateAndHour(dayStrOf(date), hour);
   const now = Math.floor(Date.now() / 1000);
-  return { id: -(slot.id * 1000), title: slot.Subject, description: '',
+  return { id: -(slot.id * 1000), title: subject, description: '',
     due_date, status: due_date < now ? 'done' : 'pending', type: 'school',
     _virtual: true, _slotId: slot.id };
 }
@@ -294,13 +305,15 @@ export default function KidDashboard() {
       const [tasksRes, examsRes, slotsRes] = await Promise.all([
         fetch(`${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${dayStrOf(days[0])}&end=${dayStrOf(days[6])}`, { headers: auth }),
         fetch(`${API_URL}${API_ENDPOINTS.CHILD.EXAMS}?start=${dayStrOf(days[0])}&end=${dayStrOf(days[6])}`, { headers: auth }).catch(() => null),
-        fetch(`${API_URL}${API_ENDPOINTS.CHILD.SCHEDULE}`, { headers: auth }).catch(() => null),
+        fetch(`/api/schedule`, { headers: auth }).catch(() => null),
       ]);
       const realTasks: Task[] = tasksRes.ok ? extractArray(await tasksRes.json()) : [];
       const examTasks: Task[] = examsRes?.ok
         ? (toAnyArray(await examsRes.json()) as Exam[]).flatMap(e => { const t = examToTask(e, days); return t ? [t] : []; })
         : [];
-      const slots: ScheduleSlot[] = slotsRes?.ok ? (toAnyArray(await slotsRes.json()) as ScheduleSlot[]) : [];
+      const slotsRaw = slotsRes?.ok ? await slotsRes.json() : [];
+      console.log('[fetchWeekData] raw schedule response:', slotsRaw);
+      const slots: ScheduleSlot[] = toAnyArray(slotsRaw) as ScheduleSlot[];
       setScheduleSlots(slots);
       const slotTasks: Task[] = slots.flatMap(s => { const t = slotToTask(s, days); return t ? [t] : []; });
       setWeekAllTasks([...realTasks, ...examTasks, ...slotTasks]);

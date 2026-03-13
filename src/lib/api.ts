@@ -15,6 +15,7 @@ export const API_ENDPOINTS = {
     CREATE: '/children',
     GET: (id: number) => `/children/${id}`,
     TASKS: (id: number) => `/children/${id}/tasks`,
+    CREATE_TASK: (id: number) => `/children/${id}/tasks`,
     UPDATE_TASK: (childId: number, taskId: number) => `/children/${childId}/tasks/${taskId}`,
     SCHEDULE: (id: number) => `/children/${id}/schedule`,
     EXAMS: (id: number) => `/children/${id}/exams`,
