@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   CheckCircle2, Circle, Clock, X, Send,
   Bot, ChevronLeft, ChevronRight,
-  Edit3, LogOut, BookOpen, Zap, Play, Pause, Target, Paperclip,
+  Edit3, LogOut, BookOpen, Zap, Play, Pause, Target,
 } from 'lucide-react';
 import { API_URL, API_ENDPOINTS } from '@/lib/api';
 
@@ -276,8 +276,6 @@ export default function KidDashboard() {
   ]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
-  const [chatFile, setChatFile] = useState<File | null>(null);
-  const chatFileRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // School schedule
@@ -416,38 +414,16 @@ export default function KidDashboard() {
     setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
     setChatLoading(true);
     try {
-      const res = await fetch('https://tahelblum.app.n8n.cloud/webhook/kidtime-bot', {
+      const res = await fetch('/api/bot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg, child_id: child?.id, auth_token: authToken }),
+        body: JSON.stringify({ message: msg, authToken }),
       });
       const data = await res.json();
       setChatMessages(prev => [...prev, { role: 'bot', text: data.reply || 'נוצרה משימה חדשה! ✅' }]);
       fetchWeekData(true);
     } catch {
       setChatMessages(prev => [...prev, { role: 'bot', text: 'אירעה שגיאה. נסה שוב.' }]);
-    } finally { setChatLoading(false); }
-  }
-
-  async function sendChatFile() {
-    if (!chatFile || chatLoading) return;
-    const file = chatFile;
-    setChatFile(null);
-    setChatMessages(prev => [...prev, { role: 'user', text: `📎 ${file.name}` }]);
-    setChatLoading(true);
-    try {
-      const text = (await file.text()).substring(0, 8000);
-      const res = await fetch('https://tahelblum.app.n8n.cloud/webhook/kidtime-bot', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_content: text, child_id: child?.id, auth_token: authToken }),
-      });
-      const raw = await res.text();
-      const data = raw ? JSON.parse(raw) : {};
-      setChatMessages(prev => [...prev, { role: 'bot', text: data.reply || 'מעולה! המשימות נוספו מהמסמך! ✅' }]);
-      fetchWeekData(true);
-    } catch {
-      setChatMessages(prev => [...prev, { role: 'bot', text: 'אירעה שגיאה בעיבוד הקובץ.' }]);
     } finally { setChatLoading(false); }
   }
 
@@ -1062,25 +1038,12 @@ export default function KidDashboard() {
               )}
               <div ref={chatEndRef} />
             </div>
-            {chatFile && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: 'var(--color-bg)', borderRadius: 8, margin: '0 0 8px 0', fontSize: '0.85rem', color: 'var(--color-primary)' }}>
-                <Paperclip size={14} />
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{chatFile.name}</span>
-                <button onClick={() => setChatFile(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}><X size={14} /></button>
-              </div>
-            )}
             <div className="chat-input-row">
-              <input ref={chatFileRef} type="file" accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg" style={{ display: 'none' }}
-                onChange={e => { setChatFile(e.target.files?.[0] || null); if (chatFileRef.current) chatFileRef.current.value = ''; }} />
-              <button className="chat-send" style={{ background: 'var(--color-bg)', color: 'var(--color-primary)' }}
-                onClick={() => chatFileRef.current?.click()} disabled={chatLoading} title="צרף קובץ">
-                <Paperclip size={18} />
-              </button>
               <input type="text" className="chat-input"
                 placeholder="לדוגמה: מבחן במתמטיקה ביום שלישי..."
                 value={chatInput} onChange={e => setChatInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && (chatFile ? sendChatFile() : sendChat())} />
-              <button className="chat-send" onClick={chatFile ? sendChatFile : sendChat} disabled={chatLoading}><Send size={18} /></button>
+                onKeyDown={e => e.key === 'Enter' && sendChat()} />
+              <button className="chat-send" onClick={sendChat} disabled={chatLoading}><Send size={18} /></button>
             </div>
           </div>
         </div>
