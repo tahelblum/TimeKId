@@ -318,6 +318,8 @@ export default function KidDashboard() {
   const [showSchoolModal, setShowSchoolModal] = useState(false);
   const [schoolGrid, setSchoolGrid] = useState<Record<string, string>>({});
   const [schoolLoading, setSchoolLoading] = useState(false);
+  const [schoolText, setSchoolText] = useState('');
+  const [schoolParseError, setSchoolParseError] = useState('');
 
   // Drag & drop
   const [dragOverCell, setDragOverCell] = useState<{ di: number; hour: number } | null>(null);
@@ -504,15 +506,55 @@ export default function KidDashboard() {
     setShowSchoolModal(true);
   }
 
+  async function parseSchoolText() {
+    if (!schoolText.trim()) return;
+    setSchoolLoading(true);
+    setSchoolParseError('');
+    try {
+      const res = await fetch('/api/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: schoolText, childId: child?.id, authToken }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSchoolParseError(data.error || 'שגיאה בניתוח הטקסט');
+      } else {
+        // Populate grid from returned slots
+        const grid: Record<string, string> = {};
+        const newSlots: ScheduleSlot[] = (data.slots ?? []) as ScheduleSlot[];
+        newSlots.forEach(slot => {
+          const dayNum = DAY_OF_WEEK_NUM[slot.day_of_week || ''];
+          if (dayNum !== undefined && dayNum <= 4) {
+            const hour = parseTimeHour(slot.start_time || '');
+            if (SCHOOL_PERIODS.includes(hour)) grid[`${dayNum}-${hour}`] = slot.Subject || '';
+          }
+        });
+        setScheduleSlots(newSlots);
+        setSchoolGrid(grid);
+        setSchoolText('');
+        setShowSchoolModal(false);
+        if (kidDataCache) kidDataCache = null;
+        fetchWeekData(true);
+      }
+    } catch {
+      setSchoolParseError('שגיאת רשת');
+    } finally {
+      setSchoolLoading(false);
+    }
+  }
+
   async function submitSchoolSchedule() {
     const entries = Object.entries(schoolGrid).filter(([, v]) => v.trim());
     setSchoolLoading(true);
-    const auth = { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' };
-    // Delete all existing slots
-    await Promise.all(scheduleSlots.map(s =>
-      fetch(`${API_URL}${API_ENDPOINTS.CHILD.DELETE_SCHEDULE(s.id)}`, { method: 'DELETE', headers: auth }).catch(() => {})
-    ));
+    // Clear existing slots via server route (uses Meta API token)
+    await fetch('/api/schedule', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ childId: child?.id }),
+    }).catch(() => {});
     // Create new slots
+    const auth = { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' };
     const created: ScheduleSlot[] = [];
     for (const [key, subject] of entries) {
       const [dayIdxStr, hourStr] = key.split('-');
@@ -535,6 +577,7 @@ export default function KidDashboard() {
     setSchoolLoading(false);
     setShowSchoolModal(false);
     setSchoolGrid({});
+    if (kidDataCache) kidDataCache = null;
     fetchWeekData(true);
   }
 
@@ -1025,6 +1068,23 @@ export default function KidDashboard() {
               <h2 className="modal-title">טעינת מערכת שעות</h2>
               <p className="modal-sub">הכנס את השיעורים שלך לשבוע הנוכחי — הם יסתמנו אוטומטית כשיסתיימו</p>
             </div>
+            <div style={{ marginBottom: 16 }}>
+              <p style={{ fontSize: 13, color: '#6C63FF', fontWeight: 600, marginBottom: 6 }}>הדבק מערכת שעות כטקסט (אוטומטי):</p>
+              <textarea
+                rows={4}
+                style={{ width: '100%', borderRadius: 10, border: '1.5px solid #e2e8f0', padding: '8px 12px', fontSize: 13, resize: 'vertical', direction: 'rtl', fontFamily: 'Nunito, sans-serif' }}
+                placeholder={'ראשון: מתמטיקה 08:00-09:00, עברית 09:00-10:00\nשני: אנגלית 08:00-09:00...\nאו כל פורמט אחר'}
+                value={schoolText}
+                onChange={e => { setSchoolText(e.target.value); setSchoolParseError(''); }}
+              />
+              {schoolParseError && <p style={{ color: '#e74c3c', fontSize: 12, marginTop: 4 }}>{schoolParseError}</p>}
+              <button className="btn-primary" style={{ marginTop: 8, width: '100%' }}
+                onClick={parseSchoolText}
+                disabled={schoolLoading || !schoolText.trim()}>
+                {schoolLoading ? 'מנתח...' : 'נתח טקסט ✨'}
+              </button>
+            </div>
+            <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: 12, marginBottom: 12 }}>— או מלא ידנית —</p>
             <div className="school-grid-wrap">
               <table className="school-grid">
                 <thead>
