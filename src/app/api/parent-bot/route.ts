@@ -1,11 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const XANO_API = 'https://x8ki-letl-twmt.n7.xano.io/api:UgeJ6dlR';
-const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
+const XANO_API  = 'https://x8ki-letl-twmt.n7.xano.io/api:UgeJ6dlR';
+const XANO_META = 'https://x8ki-letl-twmt.n7.xano.io/api:meta/workspace/136523';
+const TASK_TABLE     = 683759;
+const SCHEDULE_TABLE = 714667;
+const ANTHROPIC_API  = 'https://api.anthropic.com/v1/messages';
+
+async function metaInsert(metaToken: string, tableId: number, data: Record<string, unknown>) {
+  const res = await fetch(`${XANO_META}/table/${tableId}/content`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${metaToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return res.ok ? await res.json() : null;
+}
 
 export async function POST(req: NextRequest) {
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  if (!anthropicKey) return NextResponse.json({ reply: 'שגיאת שרת.' }, { status: 500 });
+  const metaToken    = process.env.XANO_META_TOKEN;
+  if (!anthropicKey || !metaToken) {
+    return NextResponse.json({ reply: 'שגיאת שרת.' }, { status: 500 });
+  }
 
   const { message, file_content, child_id, auth_token } = await req.json() as {
     message?: string;
@@ -18,22 +33,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ reply: 'שגיאה: חסרים פרטים.' }, { status: 400 });
   }
 
-  const today = new Date().toISOString().split('T')[0];
-  const inputText = message || file_content || '';
-
-  if (!inputText.trim()) {
-    return NextResponse.json({ reply: 'לא התקבל תוכן לעיבוד.' }, { status: 400 });
+  // Validate parent auth token
+  const meRes = await fetch(`${XANO_API}/auth/me`, {
+    headers: { Authorization: `Bearer ${auth_token}` },
+  }).catch(() => null);
+  if (!meRes?.ok) {
+    return NextResponse.json({ reply: 'אימות נכשל.' }, { status: 401 });
   }
+
+  const today = new Date().toISOString().split('T')[0];
+  const inputText = (message || file_content || '').trim();
+  if (!inputText) return NextResponse.json({ reply: 'לא התקבל תוכן.' }, { status: 400 });
 
   const isFile = !!file_content;
 
   const systemPrompt = isFile
     ? `You are a helper that extracts tasks and events from a school document (Hebrew or English).
-Extract ALL tasks, homework assignments, tests, and events.
-Return ONLY a JSON array of tasks:
+Extract ALL tasks, homework, tests, and events.
+Return ONLY a JSON array:
 [{ "title": "<title in Hebrew>", "type": "homework|test|activity|other", "due_date": "YYYY-MM-DDTHH:mm:ss", "description": "<optional>" }]
-Today is ${today}. If no date is clear, use tomorrow at 15:00. Return ONLY the JSON array.`
-    : `You are a bot that helps Israeli parents manage their child's schedule and tasks. Today is ${today}.
+Today is ${today}. If no date is clear, use tomorrow at 15:00. Return ONLY the JSON array, no explanation.`
+    : `You are a bot helping Israeli parents manage their child's schedule. Today is ${today}.
 The parent may write in Hebrew, English, or a mix.
 
 Decide if the request is:
@@ -42,22 +62,14 @@ Decide if the request is:
 
 Reply with JSON only (no markdown):
 
-For recurring weekly activity:
-{ "kind": "schedule", "subject": "<name in Hebrew>", "day_of_week": "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday", "start_time": "HH:MM", "end_time": "HH:MM" }
-
-For one-time task:
-{ "kind": "task", "title": "<title in Hebrew>", "type": "homework|test|activity|other", "due_date": "YYYY-MM-DDTHH:mm:ss", "description": "<optional>" }
+For recurring: { "kind": "schedule", "subject": "<name in Hebrew>", "day_of_week": "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday", "start_time": "HH:MM", "end_time": "HH:MM" }
+For one-time:  { "kind": "task", "title": "<title in Hebrew>", "type": "homework|test|activity|other", "due_date": "YYYY-MM-DDTHH:mm:ss", "description": "<optional>" }
 
 If no date given for task, use tomorrow at 15:00. If no time given for schedule, use 15:00.`;
 
-  // Call Claude
   const aiRes = await fetch(ANTHROPIC_API, {
     method: 'POST',
-    headers: {
-      'x-api-key': anthropicKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
+    headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: isFile ? 1500 : 500,
@@ -66,15 +78,9 @@ If no date given for task, use tomorrow at 15:00. If no time given for schedule,
     }),
   });
 
-  const authHeaders = {
-    Authorization: `Bearer ${auth_token}`,
-    'Content-Type': 'application/json',
-  };
-
   // --- File mode: extract multiple tasks ---
   if (isFile) {
     let tasks: Array<{ title: string; type: string; due_date: string; description?: string }> = [];
-
     if (aiRes.ok) {
       const aiData = await aiRes.json();
       const raw = aiData?.content?.[0]?.text ?? '';
@@ -83,35 +89,26 @@ If no date given for task, use tomorrow at 15:00. If no time given for schedule,
         if (match) tasks = JSON.parse(match[0]);
       } catch { /* ignore */ }
     }
-
-    if (tasks.length === 0) {
-      return NextResponse.json({ reply: 'לא מצאתי משימות במסמך. נסה שוב.' });
-    }
+    if (tasks.length === 0) return NextResponse.json({ reply: 'לא מצאתי משימות במסמך. נסה שוב.' });
 
     let created = 0;
     for (const task of tasks) {
-      try {
-        const due_ts = new Date(task.due_date || `${today}T15:00:00`).getTime();
-        const r = await fetch(`${XANO_API}/children/${child_id}/tasks`, {
-          method: 'POST',
-          headers: authHeaders,
-          body: JSON.stringify({
-            title: task.title,
-            type: task.type || 'homework',
-            due_date: due_ts,
-            description: task.description || '',
-          }),
-        });
-        if (r.ok) created++;
-      } catch {}
+      const due_ts = new Date(task.due_date || `${today}T15:00:00`).getTime();
+      const rec = await metaInsert(metaToken, TASK_TABLE, {
+        title: task.title,
+        type: task.type || 'homework',
+        due_date: due_ts,
+        description: task.description || '',
+        child_id,
+        status: 'pending',
+        created_by_role: 'parent',
+      });
+      if (rec) created++;
     }
-
-    return NextResponse.json({
-      reply: `✅ נוצרו ${created} משימות מהמסמך!`,
-    });
+    return NextResponse.json({ reply: `✅ נוצרו ${created} משימות מהמסמך!` });
   }
 
-  // --- Text message mode: single task or schedule ---
+  // --- Text message mode ---
   let parsed: Record<string, string> | null = null;
   if (aiRes.ok) {
     const aiData = await aiRes.json();
@@ -121,53 +118,34 @@ If no date given for task, use tomorrow at 15:00. If no time given for schedule,
       if (match) parsed = JSON.parse(match[0]);
     } catch { /* ignore */ }
   }
-
-  if (!parsed) {
-    parsed = { kind: 'task', title: inputText, type: 'other' };
-  }
+  if (!parsed) parsed = { kind: 'task', title: inputText, type: 'other' };
 
   // Recurring schedule slot
   if (parsed.kind === 'schedule') {
-    const xanoRes = await fetch(`${XANO_API}/children/${child_id}/schedule`, {
-      method: 'POST',
-      headers: authHeaders,
-      body: JSON.stringify({
-        Subject: parsed.subject || inputText,
-        day_of_week: parsed.day_of_week || 'Sunday',
-        start_time: parsed.start_time || '15:00',
-        endtime: parsed.end_time || '16:00',
-        created_by_role: 'parent',
-      }),
+    const rec = await metaInsert(metaToken, SCHEDULE_TABLE, {
+      Subject: parsed.subject || inputText,
+      day_of_week: parsed.day_of_week || 'Sunday',
+      start_time: parsed.start_time || '15:00',
+      endtime: parsed.end_time || '16:00',
+      created_by_role: 'parent',
+      user_id: child_id,
+      children_id: child_id,
     });
-
-    if (!xanoRes.ok) {
-      const err = await xanoRes.text();
-      console.error('[/api/parent-bot] schedule error:', err);
-      return NextResponse.json({ reply: 'לא הצלחתי להוסיף את הפעילות. נסה שוב.' });
-    }
-
-    return NextResponse.json({
-      reply: `✅ נוספה פעילות קבועה: "${parsed.subject}" כל ${parsed.day_of_week} בשעה ${parsed.start_time}`,
-    });
+    if (!rec) return NextResponse.json({ reply: 'לא הצלחתי להוסיף את הפעילות. נסה שוב.' });
+    return NextResponse.json({ reply: `✅ נוספה פעילות קבועה: "${parsed.subject}" כל ${parsed.day_of_week} בשעה ${parsed.start_time}` });
   }
 
   // One-time task
-  const title = parsed.title || inputText;
-  const type = parsed.type || 'homework';
   const due_ts = new Date(parsed.due_date || `${today}T15:00:00`).getTime();
-  const description = parsed.description || '';
-
-  const xanoRes = await fetch(`${XANO_API}/children/${child_id}/tasks`, {
-    method: 'POST',
-    headers: authHeaders,
-    body: JSON.stringify({ title, type, due_date: due_ts, description }),
+  const rec = await metaInsert(metaToken, TASK_TABLE, {
+    title: parsed.title || inputText,
+    type: parsed.type || 'homework',
+    due_date: due_ts,
+    description: parsed.description || '',
+    child_id,
+    status: 'pending',
+    created_by_role: 'parent',
   });
-
-  if (!xanoRes.ok) {
-    const err = await xanoRes.text();
-    console.error('[/api/parent-bot] task error:', err);
-    return NextResponse.json({ reply: 'לא הצלחתי להוסיף את המשימה. נסה שוב.' });
-  }
-
-  return NextResponse.json({ reply: `✅ נוספה משימה: "${title}"` });
+  if (!rec) return NextResponse.json({ reply: 'לא הצלחתי להוסיף את המשימה. נסה שוב.' });
+  return NextResponse.json({ reply: `✅ נוספה משימה: "${parsed.title || inputText}"` });
 }
