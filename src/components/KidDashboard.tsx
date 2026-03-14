@@ -470,10 +470,11 @@ export default function KidDashboard() {
     // Pre-populate grid from existing schedule slots
     const grid: Record<string, string> = {};
     scheduleSlots.forEach(slot => {
-      const dayNum = DAY_OF_WEEK_NUM[slot.day_of_week];
+      const dayKey = slot.day_of_week || slot.dayofweek || slot.day || '';
+      const dayNum = DAY_OF_WEEK_NUM[dayKey];
       if (dayNum !== undefined && dayNum <= 4) {
-        const hour = parseTimeHour(slot.start_time);
-        if (SCHOOL_PERIODS.includes(hour)) grid[`${dayNum}-${hour}`] = slot.Subject;
+        const hour = parseTimeHour(slot.start_time || slot.startTime || '');
+        if (SCHOOL_PERIODS.includes(hour)) grid[`${dayNum}-${hour}`] = slot.Subject || slot.subject || '';
       }
     });
     setSchoolGrid(grid);
