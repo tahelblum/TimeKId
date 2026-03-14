@@ -238,6 +238,17 @@ function updateStreak(): number {
   return next;
 }
 
+// Module-level cache for the logged-in child (single child per session)
+interface KidDataCache {
+  tasks: Task[];
+  exams: Exam[];
+  slots: ScheduleSlot[];
+  holidays: Holiday[];
+  fetchedAt: number;
+}
+let kidDataCache: KidDataCache | null = null;
+const KID_CACHE_TTL = 30 * 60 * 1000; // 30 min
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function KidDashboard() {
   const { child, authToken, logout } = useChildAuth();
@@ -254,8 +265,7 @@ export default function KidDashboard() {
   const [scheduleSlots, setScheduleSlots] = useState<ScheduleSlot[]>([]);
 
   // Cache tracking
-  const cacheRef = useRef<{ weekKey: string; fetchedAt: number } | null>(null);
-  const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 
   // Gamification
   const [points, setPoints] = useState(0);
@@ -317,35 +327,42 @@ export default function KidDashboard() {
   const calBodyRef = useRef<HTMLDivElement>(null);
   const ROW_HEIGHT = 56;
 
-  // ─── Data fetching — tasks + exams + schedule slots ───────────────────────
+  // ─── Data fetching — fetch once per session, filter client-side per week ────
+  function applyWeekView(cached: KidDataCache, days: Date[]) {
+    const examTasks: Task[] = cached.exams.flatMap(e => { const t = examToTask(e, days); return t ? [t] : []; });
+    setScheduleSlots(cached.slots);
+    const slotTasks: Task[] = cached.slots.flatMap(s => { const t = slotToTask(s, days); return t ? [t] : []; });
+    const holidayTasks: Task[] = cached.holidays.flatMap(h => holidayToTasks(h, days));
+    setWeekAllTasks([...cached.tasks, ...examTasks, ...slotTasks, ...holidayTasks]);
+  }
+
   const fetchWeekData = useCallback(async (force = false) => {
     const days = weekDays(currentDate);
-    const key = dayStrOf(days[0]);
     const now = Date.now();
-    if (!force && cacheRef.current?.weekKey === key && now - cacheRef.current.fetchedAt < CACHE_TTL) return;
+
+    if (force) kidDataCache = null;
+
+    if (kidDataCache && now - kidDataCache.fetchedAt < KID_CACHE_TTL) {
+      applyWeekView(kidDataCache, days);
+      return;
+    }
+
     setTasksLoading(true);
     const auth = { Authorization: `Bearer ${authToken}` };
     try {
+      // 4 calls once per 30 min — week navigation costs 0 extra calls
       const [tasksRes, examsRes, slotsRes, holidaysRes] = await Promise.all([
-        fetch(`${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${dayStrOf(days[0])}&end=${dayStrOf(days[6])}`, { headers: auth }),
-        fetch(`${API_URL}${API_ENDPOINTS.CHILD.EXAMS}?start=${dayStrOf(days[0])}&end=${dayStrOf(days[6])}`, { headers: auth }).catch(() => null),
+        fetch(`${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}`, { headers: auth }),
+        fetch(`${API_URL}${API_ENDPOINTS.CHILD.EXAMS}`, { headers: auth }).catch(() => null),
         fetch(`${API_URL}${API_ENDPOINTS.CHILD.SCHEDULE}`, { headers: auth }).catch(() => null),
         fetch(`${API_URL}${API_ENDPOINTS.CHILD.HOLIDAYS}`, { headers: auth }).catch(() => null),
       ]);
-      const realTasks: Task[] = tasksRes.ok ? extractArray(await tasksRes.json()) : [];
-      const examTasks: Task[] = examsRes?.ok
-        ? (toAnyArray(await examsRes.json()) as Exam[]).flatMap(e => { const t = examToTask(e, days); return t ? [t] : []; })
-        : [];
-      const slotsRaw = slotsRes?.ok ? await slotsRes.json() : [];
-      console.log('[fetchWeekData] raw schedule response:', slotsRaw);
-      const slots: ScheduleSlot[] = toAnyArray(slotsRaw) as ScheduleSlot[];
-      setScheduleSlots(slots);
-      const slotTasks: Task[] = slots.flatMap(s => { const t = slotToTask(s, days); return t ? [t] : []; });
-      const holidayTasks: Task[] = holidaysRes?.ok
-        ? (toAnyArray(await holidaysRes.json()) as Holiday[]).flatMap(h => holidayToTasks(h, days))
-        : [];
-      setWeekAllTasks([...realTasks, ...examTasks, ...slotTasks, ...holidayTasks]);
-      cacheRef.current = { weekKey: key, fetchedAt: now };
+      const tasks: Task[]         = tasksRes.ok   ? extractArray(await tasksRes.json())            : [];
+      const exams: Exam[]         = examsRes?.ok   ? toAnyArray(await examsRes.json()) as Exam[]   : [];
+      const slots: ScheduleSlot[] = slotsRes?.ok   ? toAnyArray(await slotsRes.json()) as ScheduleSlot[] : [];
+      const holidays: Holiday[]   = holidaysRes?.ok ? toAnyArray(await holidaysRes.json()) as Holiday[] : [];
+      kidDataCache = { tasks, exams, slots, holidays, fetchedAt: now };
+      applyWeekView(kidDataCache, days);
     } catch {} finally { setTasksLoading(false); }
   }, [currentDate, authToken]);
 

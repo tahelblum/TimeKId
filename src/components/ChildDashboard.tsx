@@ -112,7 +112,18 @@ const HEBREW_DAYS   = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמ
 const HEBREW_MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 const GRID_HOURS    = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
 const ROW_HEIGHT    = 56;
-const CACHE_TTL     = 15 * 60 * 1000;
+const CACHE_TTL     = 30 * 60 * 1000; // 30 min — Xano returns all records anyway, no need to re-fetch per week
+
+// Module-level cache: keyed by childId. Persists across week navigation without re-fetching.
+// Xano's task/exam queries return ALL records for the child (no server-side date filter),
+// so one fetch covers every week — we filter client-side.
+interface ChildDataCache {
+  tasks: Task[];
+  exams: Exam[];
+  slots: ScheduleSlot[];
+  fetchedAt: number;
+}
+const childDataCache: Record<number, ChildDataCache> = {};
 
 function weekStart(d: Date): Date {
   const r = new Date(d); r.setDate(r.getDate() - r.getDay()); r.setHours(0, 0, 0, 0); return r;
@@ -160,7 +171,6 @@ export default function ChildDashboard({ childId }: { childId: number }) {
   const [tasksLoading, setTasksLoading] = useState(true);
   const [view, setView] = useState<'day' | 'week'>('day');
   const [currentDate, setCurrentDate] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; });
-  const cacheRef = useRef<{ weekKey: string; fetchedAt: number } | null>(null);
   const calBodyRef = useRef<HTMLDivElement>(null);
 
   const [activeModal, setActiveModal] = useState<null | 'bot' | 'document' | 'compliment' | 'reminder' | 'secondary' | 'study-planner'>(null);
@@ -197,42 +207,51 @@ export default function ChildDashboard({ childId }: { childId: number }) {
   const wDays = weekDays(currentDate);
   const today = new Date();
 
-  // ─── Data fetching — tasks + exams + schedule slots ───────────────────────
+  // ─── Data fetching — fetch once per child, filter client-side per week ───────
+  // Xano returns ALL tasks/exams for the child regardless of date params,
+  // so we cache the full dataset and never re-fetch just because the week changed.
+  function applyWeekView(cached: ChildDataCache, days: Date[]) {
+    const examTasks: Task[] = cached.exams.flatMap(e => { const t = examToTask(e, days); return t ? [t] : []; });
+    const slotTasks: Task[] = cached.slots.flatMap(s => { const t = slotToTask(s, days); return t ? [t] : []; });
+    const allTasks = [...cached.tasks, ...examTasks, ...slotTasks];
+    setWeekAllTasks(allTasks);
+    const nowTs = Math.floor(Date.now() / 1000);
+    const in7days = nowTs + 7 * 86400;
+    const isTestTask = (t: Task) => t.type === 'test' || /מבחן|בוחן|טסט|בחינה/.test(t.title);
+    setUpcomingTests(
+      allTasks.filter(t => !t._virtual && isTestTask(t) && t.due_date >= nowTs && t.due_date <= in7days)
+        .sort((a, b) => a.due_date - b.due_date)
+    );
+  }
+
   const fetchWeekData = useCallback(async (force = false) => {
     const days = weekDays(currentDate);
-    const key = dayStrOf(days[0]);
     const now = Date.now();
-    if (!force && cacheRef.current?.weekKey === key && now - cacheRef.current.fetchedAt < CACHE_TTL) return;
+    const cached = childDataCache[childId];
+
+    // Force refresh = invalidate module cache so next fetch hits Xano
+    if (force) delete childDataCache[childId];
+
+    // If we have fresh data, just re-filter for the current week — no API call
+    if (!force && cached && now - cached.fetchedAt < CACHE_TTL) {
+      applyWeekView(cached, days);
+      return;
+    }
+
     setTasksLoading(true);
     const auth = { 'Authorization': `Bearer ${authToken}` };
-    const start = dayStrOf(days[0]);
-    // Fetch 14 days so upcoming-tests (next 7 days) are included without a second call
-    const farEnd = new Date(days[6]); farEnd.setDate(farEnd.getDate() + 7);
-    const end = dayStrOf(farEnd);
     try {
+      // 3 calls total — once per 30 min regardless of how many weeks the user browses
       const [tasksRes, examsRes, slotsRes] = await Promise.all([
-        fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}?start=${start}&end=${end}`, { headers: auth }),
-        fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.EXAMS(childId)}?start=${start}&end=${end}`, { headers: auth }).catch(() => null),
+        fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}`, { headers: auth }),
+        fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.EXAMS(childId)}`, { headers: auth }).catch(() => null),
         fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.SCHEDULE(childId)}`, { headers: auth }).catch(() => null),
       ]);
-      const realTasks: Task[] = tasksRes.ok ? extractArray(await tasksRes.json()) : [];
-      const examTasks: Task[] = examsRes?.ok
-        ? (toAnyArray(await examsRes.json()) as Exam[]).flatMap(e => { const t = examToTask(e, days); return t ? [t] : []; })
-        : [];
-      const slotsRaw = slotsRes?.ok ? await slotsRes.json() : [];
-      const slots: ScheduleSlot[] = toAnyArray(slotsRaw) as ScheduleSlot[];
-      const slotTasks: Task[] = slots.flatMap(s => { const t = slotToTask(s, days); return t ? [t] : []; });
-      const allTasks = [...realTasks, ...examTasks, ...slotTasks];
-      setWeekAllTasks(allTasks);
-      // Derive upcoming tests from the extended fetch — no extra API call needed
-      const nowTs = Math.floor(Date.now() / 1000);
-      const in7days = nowTs + 7 * 86400;
-      const isTestTask = (t: Task) => t.type === 'test' || /מבחן|בוחן|טסט|בחינה/.test(t.title);
-      setUpcomingTests(
-        allTasks.filter(t => !t._virtual && isTestTask(t) && t.due_date >= nowTs && t.due_date <= in7days)
-          .sort((a, b) => a.due_date - b.due_date)
-      );
-      cacheRef.current = { weekKey: key, fetchedAt: now };
+      const tasks: Task[]        = tasksRes.ok  ? extractArray(await tasksRes.json())          : [];
+      const exams: Exam[]        = examsRes?.ok  ? toAnyArray(await examsRes.json()) as Exam[]  : [];
+      const slots: ScheduleSlot[] = slotsRes?.ok ? toAnyArray(await slotsRes.json()) as ScheduleSlot[] : [];
+      childDataCache[childId] = { tasks, exams, slots, fetchedAt: now };
+      applyWeekView(childDataCache[childId], days);
     } catch { setWeekAllTasks([]); } finally { setTasksLoading(false); }
   }, [currentDate, childId, authToken]);
 
