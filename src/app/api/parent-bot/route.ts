@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const XANO_API  = 'https://x8ki-letl-twmt.n7.xano.io/api:UgeJ6dlR';
 const XANO_META = 'https://x8ki-letl-twmt.n7.xano.io/api:meta/workspace/136523';
 const TASK_TABLE     = 683759;
 const SCHEDULE_TABLE = 714667;
@@ -16,10 +15,16 @@ async function metaInsert(metaToken: string, tableId: number, data: Record<strin
 }
 
 export async function POST(req: NextRequest) {
+  try {
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const metaToken    = process.env.XANO_META_TOKEN;
-  if (!anthropicKey || !metaToken) {
-    return NextResponse.json({ reply: 'שגיאת שרת.' }, { status: 500 });
+  if (!anthropicKey) {
+    console.error('[/api/parent-bot] ANTHROPIC_API_KEY not set');
+    return NextResponse.json({ reply: 'שגיאת שרת: מפתח AI חסר.' }, { status: 500 });
+  }
+  if (!metaToken) {
+    console.error('[/api/parent-bot] XANO_META_TOKEN not set');
+    return NextResponse.json({ reply: 'שגיאת שרת: מפתח Xano חסר.' }, { status: 500 });
   }
 
   const { message, file_content, child_id, auth_token } = await req.json() as {
@@ -31,14 +36,6 @@ export async function POST(req: NextRequest) {
 
   if (!child_id || !auth_token) {
     return NextResponse.json({ reply: 'שגיאה: חסרים פרטים.' }, { status: 400 });
-  }
-
-  // Validate parent auth token
-  const meRes = await fetch(`${XANO_API}/auth/me`, {
-    headers: { Authorization: `Bearer ${auth_token}` },
-  }).catch(() => null);
-  if (!meRes?.ok) {
-    return NextResponse.json({ reply: 'אימות נכשל.' }, { status: 401 });
   }
 
   const today = new Date().toISOString().split('T')[0];
@@ -148,4 +145,9 @@ If no date given for task, use tomorrow at 15:00. If no time given for schedule,
   });
   if (!rec) return NextResponse.json({ reply: 'לא הצלחתי להוסיף את המשימה. נסה שוב.' });
   return NextResponse.json({ reply: `✅ נוספה משימה: "${parsed.title || inputText}"` });
+
+  } catch (err) {
+    console.error('[/api/parent-bot] unhandled error:', err);
+    return NextResponse.json({ reply: 'שגיאת שרת לא צפויה.' }, { status: 500 });
+  }
 }
