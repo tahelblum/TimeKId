@@ -302,15 +302,13 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     } catch {}
   }
 
-  const N8N_WEBHOOK = 'https://tahelblum.app.n8n.cloud/webhook/kidtime-bot';
-
   async function sendBotMessage() {
     if (!botInput.trim() || botLoading) return;
     const msg = botInput.trim(); setBotInput('');
     setBotMessages(prev => [...prev, { role: 'user', text: msg }]);
     setBotLoading(true);
     try {
-      const res = await fetch(N8N_WEBHOOK, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg, child_id: childId, auth_token: authToken }) });
+      const res = await fetch('/api/parent-bot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg, child_id: childId, auth_token: authToken }) });
       const data = await res.json();
       setBotMessages(prev => [...prev, { role: 'bot', text: data.reply || 'המשימה נוצרה בהצלחה!' }]);
       fetchWeekData(true);
@@ -325,9 +323,8 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     setBotLoading(true);
     try {
       const text = (await file.text()).substring(0, 8000);
-      const res = await fetch(N8N_WEBHOOK, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file_content: text, child_id: childId, auth_token: authToken }) });
-      const raw = await res.text();
-      const data = raw ? JSON.parse(raw) : {};
+      const res = await fetch('/api/parent-bot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file_content: text, child_id: childId, auth_token: authToken }) });
+      const data = await res.json();
       setBotMessages(prev => [...prev, { role: 'bot', text: data.reply || 'מעולה! המשימות נוספו מהמסמך! ✅' }]);
       fetchWeekData(true);
     } catch { setBotMessages(prev => [...prev, { role: 'bot', text: 'שגיאה בעיבוד הקובץ. נסה שוב.' }]); }
