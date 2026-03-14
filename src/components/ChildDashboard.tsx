@@ -614,9 +614,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
         <button className="fab-btn fab-bot" onClick={() => { setActionSuccess(''); setActiveModal('bot'); }}>
           <Bot size={22} /><span>בוט</span>
         </button>
-        <button className="fab-btn fab-doc" onClick={() => { setActionSuccess(''); setActiveModal('document'); }}>
-          <FileText size={22} /><span>מסמך</span>
-        </button>
+
         <button className="fab-btn fab-star" onClick={() => { setActionSuccess(''); setActiveModal('compliment'); }}>
           <Star size={22} /><span>מחמאה</span>
         </button>

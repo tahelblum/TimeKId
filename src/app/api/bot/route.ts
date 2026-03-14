@@ -55,22 +55,22 @@ If no time is given for a schedule slot, use 15:00.`,
     }),
   });
 
-  if (!aiRes.ok) {
+  // Parse AI response — fall back to creating a basic task if AI fails
+  let parsed: Record<string, string> | null = null;
+  if (aiRes.ok) {
+    const aiData = await aiRes.json();
+    const raw = aiData?.content?.[0]?.text ?? '';
+    try {
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) parsed = JSON.parse(match[0]);
+    } catch { /* ignore */ }
+  } else {
     console.error('[/api/bot] Anthropic error:', aiRes.status);
-    return NextResponse.json({ reply: 'לא הצלחתי להבין את הבקשה. נסה שוב.' });
   }
 
-  const aiData = await aiRes.json();
-  const raw = aiData?.content?.[0]?.text ?? '';
-
-  let parsed: Record<string, string> | null = null;
-  try {
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (match) parsed = JSON.parse(match[0]);
-  } catch { /* ignore */ }
-
+  // If AI parsing failed, create a plain task from the message text
   if (!parsed) {
-    return NextResponse.json({ reply: 'לא הצלחתי להבין את הבקשה. נסה שוב.' });
+    parsed = { kind: 'task', title: message, type: 'other' };
   }
 
   // --- Recurring schedule slot ---
