@@ -112,7 +112,7 @@ const HEBREW_DAYS   = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמ
 const HEBREW_MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 const GRID_HOURS    = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
 const ROW_HEIGHT    = 56;
-const CACHE_TTL     = 5 * 60 * 1000;
+const CACHE_TTL     = 15 * 60 * 1000;
 
 function weekStart(d: Date): Date {
   const r = new Date(d); r.setDate(r.getDate() - r.getDay()); r.setHours(0, 0, 0, 0); return r;
@@ -205,7 +205,10 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     if (!force && cacheRef.current?.weekKey === key && now - cacheRef.current.fetchedAt < CACHE_TTL) return;
     setTasksLoading(true);
     const auth = { 'Authorization': `Bearer ${authToken}` };
-    const start = dayStrOf(days[0]); const end = dayStrOf(days[6]);
+    const start = dayStrOf(days[0]);
+    // Fetch 14 days so upcoming-tests (next 7 days) are included without a second call
+    const farEnd = new Date(days[6]); farEnd.setDate(farEnd.getDate() + 7);
+    const end = dayStrOf(farEnd);
     try {
       const [tasksRes, examsRes, slotsRes] = await Promise.all([
         fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}?start=${start}&end=${end}`, { headers: auth }),
@@ -217,10 +220,18 @@ export default function ChildDashboard({ childId }: { childId: number }) {
         ? (toAnyArray(await examsRes.json()) as Exam[]).flatMap(e => { const t = examToTask(e, days); return t ? [t] : []; })
         : [];
       const slotsRaw = slotsRes?.ok ? await slotsRes.json() : [];
-      console.log('[fetchWeekData] raw schedule response:', slotsRaw);
       const slots: ScheduleSlot[] = toAnyArray(slotsRaw) as ScheduleSlot[];
       const slotTasks: Task[] = slots.flatMap(s => { const t = slotToTask(s, days); return t ? [t] : []; });
-      setWeekAllTasks([...realTasks, ...examTasks, ...slotTasks]);
+      const allTasks = [...realTasks, ...examTasks, ...slotTasks];
+      setWeekAllTasks(allTasks);
+      // Derive upcoming tests from the extended fetch — no extra API call needed
+      const nowTs = Math.floor(Date.now() / 1000);
+      const in7days = nowTs + 7 * 86400;
+      const isTestTask = (t: Task) => t.type === 'test' || /מבחן|בוחן|טסט|בחינה/.test(t.title);
+      setUpcomingTests(
+        allTasks.filter(t => !t._virtual && isTestTask(t) && t.due_date >= nowTs && t.due_date <= in7days)
+          .sort((a, b) => a.due_date - b.due_date)
+      );
       cacheRef.current = { weekKey: key, fetchedAt: now };
     } catch { setWeekAllTasks([]); } finally { setTasksLoading(false); }
   }, [currentDate, childId, authToken]);
@@ -242,26 +253,6 @@ export default function ChildDashboard({ childId }: { childId: number }) {
   }
   useEffect(() => { fetchChild(); }, [childId]);
 
-  // ─── Upcoming tests (next 7 days) ─────────────────────────────────────────
-  useEffect(() => {
-    async function fetchUpcomingTests() {
-      const now = new Date(); now.setHours(0, 0, 0, 0);
-      const end = new Date(now); end.setDate(end.getDate() + 7);
-      const start = toAPIDate(now);
-      const endStr = toAPIDate(end);
-      try {
-        const res = await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}?start=${start}&end=${endStr}`, {
-          headers: { 'Authorization': `Bearer ${authToken}` },
-        });
-        if (!res.ok) return;
-        const all = extractArray(await res.json());
-        const isTestTask = (t: Task) =>
-          t.type === 'test' || /מבחן|בוחן|טסט|בחינה/.test(t.title);
-        setUpcomingTests(all.filter(isTestTask).sort((a, b) => a.due_date - b.due_date));
-      } catch {}
-    }
-    fetchUpcomingTests();
-  }, [childId, authToken]);
 
   // ─── Actions ──────────────────────────────────────────────────────────────
   async function toggleTaskStatus(task: Task) {
