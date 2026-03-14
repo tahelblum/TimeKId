@@ -11,10 +11,13 @@ import {
 import { API_URL, API_ENDPOINTS } from '@/lib/api';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const normalizeTasks = (arr: Task[]): Task[] => arr.map(t => ({
-  ...t,
-  due_date: t.due_date || (t.due_time ? Math.floor(new Date(t.due_time + 'T12:00:00').getTime() / 1000) : 0),
-}));
+const normalizeTasks = (arr: Task[]): Task[] => arr.map(t => {
+  let due = t.due_date;
+  if (!due && t.due_time) due = Math.floor(new Date(t.due_time + 'T12:00:00').getTime() / 1000);
+  // Xano returns timestamps in milliseconds; convert to seconds for all calendar math
+  if (due && due > 1e10) due = Math.floor(due / 1000);
+  return { ...t, due_date: due || 0 };
+});
 const extractArray = (d: unknown): Task[] => {
   let arr: Task[] = [];
   if (Array.isArray(d)) arr = d;
@@ -35,7 +38,7 @@ interface Task {
   due_date: number;
   due_time?: string; // YYYY-MM-DD, fallback for old records where due_date is null
   status: 'pending' | 'in_progress' | 'done';
-  type: 'homework' | 'test' | 'activity' | 'other' | 'school';
+  type: 'homework' | 'test' | 'activity' | 'other' | 'school' | 'holiday';
   _virtual?: boolean;  // true = display-only (schedule slot / exam), no PATCH
   _examId?: number;
   _slotId?: number;
@@ -63,6 +66,13 @@ interface ScheduleSlot {
   endTime?: string;
   children_id?: number;
   subjects_id?: number;
+}
+interface Holiday {
+  id: number;
+  name: string;
+  start_date: string;  // YYYY-MM-DD
+  end_date?: string;   // YYYY-MM-DD
+  holiday_type?: string;
 }
 interface ChatMessage { role: 'user' | 'bot'; text: string; }
 
@@ -102,6 +112,22 @@ function slotToTask(slot: ScheduleSlot, days: Date[]): Task | null {
   return { id: -(slot.id * 1000), title: subject, description: '',
     due_date, status: due_date < now ? 'done' : 'pending', type: 'school',
     _virtual: true, _slotId: slot.id };
+}
+function holidayToTasks(holiday: Holiday, days: Date[]): Task[] {
+  if (!holiday.start_date) return [];
+  const start = new Date(holiday.start_date + 'T00:00:00');
+  const end = holiday.end_date ? new Date(holiday.end_date + 'T00:00:00') : start;
+  return days
+    .filter(d => d >= start && d <= end)
+    .map(d => ({
+      id: -(holiday.id * 100000 + d.getDay()),
+      title: '🎉 ' + holiday.name,
+      description: holiday.holiday_type || '',
+      due_date: tsFromDateAndHour(dayStrOf(d), 0), // hour 0 = all-day (outside GRID_HOURS)
+      status: 'pending' as const,
+      type: 'holiday' as const,
+      _virtual: true,
+    }));
 }
 
 // ─── Calendar / school constants ──────────────────────────────────────────────
@@ -300,10 +326,11 @@ export default function KidDashboard() {
     setTasksLoading(true);
     const auth = { Authorization: `Bearer ${authToken}` };
     try {
-      const [tasksRes, examsRes, slotsRes] = await Promise.all([
+      const [tasksRes, examsRes, slotsRes, holidaysRes] = await Promise.all([
         fetch(`${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}?start=${dayStrOf(days[0])}&end=${dayStrOf(days[6])}`, { headers: auth }),
         fetch(`${API_URL}${API_ENDPOINTS.CHILD.EXAMS}?start=${dayStrOf(days[0])}&end=${dayStrOf(days[6])}`, { headers: auth }).catch(() => null),
         fetch(`${API_URL}${API_ENDPOINTS.CHILD.SCHEDULE}`, { headers: auth }).catch(() => null),
+        fetch(`${API_URL}${API_ENDPOINTS.CHILD.HOLIDAYS}`, { headers: auth }).catch(() => null),
       ]);
       const realTasks: Task[] = tasksRes.ok ? extractArray(await tasksRes.json()) : [];
       const examTasks: Task[] = examsRes?.ok
@@ -314,7 +341,10 @@ export default function KidDashboard() {
       const slots: ScheduleSlot[] = toAnyArray(slotsRaw) as ScheduleSlot[];
       setScheduleSlots(slots);
       const slotTasks: Task[] = slots.flatMap(s => { const t = slotToTask(s, days); return t ? [t] : []; });
-      setWeekAllTasks([...realTasks, ...examTasks, ...slotTasks]);
+      const holidayTasks: Task[] = holidaysRes?.ok
+        ? (toAnyArray(await holidaysRes.json()) as Holiday[]).flatMap(h => holidayToTasks(h, days))
+        : [];
+      setWeekAllTasks([...realTasks, ...examTasks, ...slotTasks, ...holidayTasks]);
       cacheRef.current = { weekKey: key, fetchedAt: now };
     } catch {} finally { setTasksLoading(false); }
   }, [currentDate, authToken]);
@@ -528,7 +558,7 @@ export default function KidDashboard() {
     const d = new Date(prev); d.setDate(d.getDate() + delta); return d;
   });
 
-  const typeEmoji = (t: Task['type']) => ({ homework: '📚', test: '📝', activity: '🎨', other: '✏️', school: '🏫' }[t] ?? '✏️');
+  const typeEmoji = (t: Task['type']) => ({ homework: '📚', test: '📝', activity: '🎨', other: '✏️', school: '🏫', holiday: '🎉' }[t] ?? '✏️');
   const statusIcon = (s: Task['status'], big = false) => {
     const size = big ? 30 : 24;
     if (s === 'done') return <CheckCircle2 size={size} color="#6BCB77" />;

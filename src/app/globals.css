@@ -1107,8 +1107,9 @@ body {
 }
 .sc-event:active { transform: scale(0.97); }
 .sc-event.ev-done    { opacity: 0.38; background: #F5F5F5; border-right-color: #aaa; }
-.sc-event.ev-school  { background: #EBF8FD; border-right-color: #0984E3; }
-.sc-event.ev-test, .sc-event.ev-test { background: #FFF0EB; border-right-color: #E17055; }
+.sc-event.ev-school   { background: #EBF8FD; border-right-color: #0984E3; }
+.sc-event.ev-test     { background: #FFF0EB; border-right-color: #E17055; }
+.sc-event.ev-holiday  { background: #FFF8E1; border-right-color: #F9A825; font-weight: 600; }
 .sc-event.urgency-overdue  { background: #FFF5F5; border-right-color: #FF6B6B; }
 .sc-event.urgency-today    { background: #FFF9F0; border-right-color: #FF9F43; }
 .sc-event.urgency-tomorrow { border-right-color: #FFD93D; }

@@ -1,10 +1,13 @@
 'use client';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const normalizeTasks = (arr: Task[]): Task[] => arr.map(t => ({
-  ...t,
-  due_date: t.due_date || (t.due_time ? Math.floor(new Date(t.due_time + 'T12:00:00').getTime() / 1000) : 0),
-}));
+const normalizeTasks = (arr: Task[]): Task[] => arr.map(t => {
+  let due = t.due_date;
+  if (!due && t.due_time) due = Math.floor(new Date(t.due_time + 'T12:00:00').getTime() / 1000);
+  // Xano returns timestamps in milliseconds; convert to seconds for all calendar math
+  if (due && due > 1e10) due = Math.floor(due / 1000);
+  return { ...t, due_date: due || 0 };
+});
 const extractArray = (d: unknown): Task[] => {
   let arr: Task[] = [];
   if (Array.isArray(d)) arr = d;
