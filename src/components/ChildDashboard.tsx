@@ -163,7 +163,7 @@ function urgencyKey(ts: number, status: Task['status']): 'done' | 'overdue' | 't
 const TYPE_EMOJI: Record<Task['type'], string> = { homework: '📚', test: '📝', activity: '🎨', school: '🏫', other: '✏️' };
 
 export default function ChildDashboard({ childId }: { childId: number }) {
-  const { authToken } = useAuth();
+  const { authToken, loading: authLoading } = useAuth();
   const router = useRouter();
 
   const [child, setChild] = useState<Child | null>(null);
@@ -225,6 +225,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
   }
 
   const fetchWeekData = useCallback(async (force = false) => {
+    if (!authToken) return;
     const days = weekDays(currentDate);
     const now = Date.now();
     const cached = childDataCache[childId];
@@ -253,8 +254,11 @@ export default function ChildDashboard({ childId }: { childId: number }) {
       childDataCache[childId] = { tasks, exams, slots, fetchedAt: now };
       applyWeekView(childDataCache[childId], days);
     } catch { setWeekAllTasks([]); } finally { setTasksLoading(false); }
-  }, [currentDate, childId, authToken]);
+  }, [currentDate, childId, authToken, authLoading]);
 
+  useEffect(() => {
+    if (!authLoading && !authToken) router.push('/');
+  }, [authLoading, authToken, router]);
   useEffect(() => { fetchWeekData(); }, [fetchWeekData]);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [botMessages]);
   useEffect(() => {
