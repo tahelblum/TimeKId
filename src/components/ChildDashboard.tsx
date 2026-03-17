@@ -254,7 +254,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
       childDataCache[childId] = { tasks, exams, slots, fetchedAt: now };
       applyWeekView(childDataCache[childId], days);
     } catch { setWeekAllTasks([]); } finally { setTasksLoading(false); }
-  }, [currentDate, childId, authToken, authLoading]);
+  }, [currentDate, childId, authToken]);
 
   useEffect(() => {
     if (!authLoading && !authToken) router.push('/');
