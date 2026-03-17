@@ -27,9 +27,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ reply: 'שגיאת שרת: מפתח Xano חסר.' }, { status: 500 });
   }
 
-  const { message, file_content, child_id, auth_token } = await req.json() as {
+  const { message, file_content, image_base64, image_type, child_id, auth_token } = await req.json() as {
     message?: string;
     file_content?: string;
+    image_base64?: string;
+    image_type?: string;
     child_id: number;
     auth_token: string;
   };
@@ -39,17 +41,21 @@ export async function POST(req: NextRequest) {
   }
 
   const today = new Date().toISOString().split('T')[0];
+  const isImage = !!image_base64;
+  const isFile = !!file_content || isImage;
   const inputText = (message || file_content || '').trim();
-  if (!inputText) return NextResponse.json({ reply: 'לא התקבל תוכן.' }, { status: 400 });
-
-  const isFile = !!file_content;
+  if (!inputText && !isImage) return NextResponse.json({ reply: 'לא התקבל תוכן.' }, { status: 400 });
 
   const systemPrompt = isFile
     ? `You are a helper that extracts tasks and events from a school document (Hebrew or English).
-Extract ALL tasks, homework, tests, and events.
-Return ONLY a JSON array:
-[{ "title": "<title in Hebrew>", "type": "homework|test|activity|other", "due_date": "YYYY-MM-DDTHH:mm:ss", "description": "<optional>" }]
-Today is ${today}. If no date is clear, use tomorrow at 15:00. Return ONLY the JSON array, no explanation.`
+This may be a test/exam schedule or a weekly class schedule.
+For test schedules: extract each test/exam as a task with type "test".
+For weekly schedules: extract each subject per day as a recurring schedule slot.
+Return ONLY a JSON array — no explanation, no markdown:
+For tasks/tests: [{ "kind": "task", "title": "<subject in Hebrew> - מבחן", "type": "test", "due_date": "YYYY-MM-DDTHH:mm:ss", "description": "<מבחן/מבדק/שכבתי>" }]
+For schedule slots: [{ "kind": "schedule", "subject": "<subject in Hebrew>", "day_of_week": "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday", "start_time": "HH:MM", "end_time": "HH:MM" }]
+You may mix both kinds in the same array if the document contains both.
+Today is ${today}. The current year is ${new Date().getFullYear()}. Use the correct year for dates.`
     : `You are a bot helping Israeli parents manage their child's schedule. Today is ${today}.
 The parent may write in Hebrew, English, or a mix.
 
@@ -64,45 +70,71 @@ For one-time:  { "kind": "task", "title": "<title in Hebrew>", "type": "homework
 
 If no date given for task, use tomorrow at 15:00. If no time given for schedule, use 15:00.`;
 
+  const userContent = isImage
+    ? [
+        { type: 'image', source: { type: 'base64', media_type: image_type || 'image/jpeg', data: image_base64 } },
+        { type: 'text', text: 'Extract all tasks, tests, and schedule slots from this school document image. Return JSON array only.' },
+      ]
+    : inputText.substring(0, 8000);
+
   const aiRes = await fetch(ANTHROPIC_API, {
     method: 'POST',
     headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: isFile ? 1500 : 500,
+      max_tokens: isFile ? 2000 : 500,
       system: systemPrompt,
-      messages: [{ role: 'user', content: inputText.substring(0, 8000) }],
+      messages: [{ role: 'user', content: userContent }],
     }),
   });
 
-  // --- File mode: extract multiple tasks ---
+  // --- File / Image mode: extract tasks and/or schedule slots ---
   if (isFile) {
-    let tasks: Array<{ title: string; type: string; due_date: string; description?: string }> = [];
+    type ExtractedItem = { kind?: string; title?: string; type?: string; due_date?: string; description?: string; subject?: string; day_of_week?: string; start_time?: string; end_time?: string };
+    let items: ExtractedItem[] = [];
     if (aiRes.ok) {
       const aiData = await aiRes.json();
       const raw = aiData?.content?.[0]?.text ?? '';
+      console.log('[parent-bot] AI raw response:', raw.substring(0, 500));
       try {
         const match = raw.match(/\[[\s\S]*\]/);
-        if (match) tasks = JSON.parse(match[0]);
+        if (match) items = JSON.parse(match[0]);
       } catch { /* ignore */ }
     }
-    if (tasks.length === 0) return NextResponse.json({ reply: 'לא מצאתי משימות במסמך. נסה שוב.' });
+    if (items.length === 0) return NextResponse.json({ reply: 'לא מצאתי משימות במסמך. נסה שוב.' });
 
-    let created = 0;
-    for (const task of tasks) {
-      const due_ts = new Date(task.due_date || `${today}T15:00:00`).getTime();
-      const rec = await metaInsert(metaToken, TASK_TABLE, {
-        title: task.title,
-        type: task.type || 'homework',
-        due_date: due_ts,
-        description: task.description || '',
-        child_id,
-        status: 'pending',
-        created_by_role: 'parent',
-      });
-      if (rec) created++;
+    let createdTasks = 0, createdSlots = 0;
+    for (const item of items) {
+      if (item.kind === 'schedule') {
+        const rec = await metaInsert(metaToken, SCHEDULE_TABLE, {
+          Subject: item.subject || 'שיעור',
+          day_of_week: item.day_of_week || 'Sunday',
+          start_time: item.start_time || '08:00',
+          endtime: item.end_time || '09:00',
+          created_by_role: 'parent',
+          user_id: child_id,
+          children_id: child_id,
+        });
+        if (rec) createdSlots++;
+      } else {
+        const due_ts = new Date(item.due_date || `${today}T15:00:00`).getTime();
+        const rec = await metaInsert(metaToken, TASK_TABLE, {
+          title: item.title || 'משימה',
+          type: item.type || 'homework',
+          due_date: due_ts,
+          description: item.description || '',
+          child_id,
+          status: 'pending',
+          created_by_role: 'parent',
+        });
+        if (rec) createdTasks++;
+      }
     }
-    return NextResponse.json({ reply: `✅ נוצרו ${created} משימות מהמסמך!` });
+    const parts = [];
+    if (createdTasks > 0) parts.push(`${createdTasks} משימות`);
+    if (createdSlots > 0) parts.push(`${createdSlots} שיעורים לוח זמנים`);
+    if (parts.length === 0) return NextResponse.json({ reply: 'לא הצלחתי לשמור את הפריטים. נסה שוב.' });
+    return NextResponse.json({ reply: `✅ נוצרו ${parts.join(' ו-')} מהמסמך!` });
   }
 
   // --- Text message mode ---

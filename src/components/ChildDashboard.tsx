@@ -326,8 +326,21 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     setBotMessages(prev => [...prev, { role: 'user', text: `📎 ${file.name}` }]);
     setBotLoading(true);
     try {
-      const text = (await file.text()).substring(0, 8000);
-      const res = await fetch('/api/parent-bot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file_content: text, child_id: childId, auth_token: authToken }) });
+      const isImage = file.type.startsWith('image/');
+      let body: Record<string, unknown>;
+      if (isImage) {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        body = { image_base64: base64, image_type: file.type, child_id: childId, auth_token: authToken };
+      } else {
+        const text = (await file.text()).substring(0, 8000);
+        body = { file_content: text, child_id: childId, auth_token: authToken };
+      }
+      const res = await fetch('/api/parent-bot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await res.json();
       setBotMessages(prev => [...prev, { role: 'bot', text: data.reply || 'מעולה! המשימות נוספו מהמסמך! ✅' }]);
       fetchWeekData(true);
