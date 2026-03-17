@@ -92,16 +92,24 @@ If no date given for task, use tomorrow at 15:00. If no time given for schedule,
   if (isFile) {
     type ExtractedItem = { kind?: string; title?: string; type?: string; due_date?: string; description?: string; subject?: string; day_of_week?: string; start_time?: string; end_time?: string };
     let items: ExtractedItem[] = [];
-    if (aiRes.ok) {
-      const aiData = await aiRes.json();
-      const raw = aiData?.content?.[0]?.text ?? '';
-      console.log('[parent-bot] AI raw response:', raw.substring(0, 500));
-      try {
-        const match = raw.match(/\[[\s\S]*\]/);
-        if (match) items = JSON.parse(match[0]);
-      } catch { /* ignore */ }
+    if (!aiRes.ok) {
+      const errBody = await aiRes.text();
+      console.error('[parent-bot] AI API error:', aiRes.status, errBody.substring(0, 300));
+      return NextResponse.json({ reply: `שגיאת AI (${aiRes.status}). בדוק שה-API key תקין.` }, { status: 500 });
     }
-    if (items.length === 0) return NextResponse.json({ reply: 'לא מצאתי משימות במסמך. נסה שוב.' });
+    const aiData = await aiRes.json();
+    const raw = aiData?.content?.[0]?.text ?? '';
+    console.log('[parent-bot] AI raw response (full):', raw);
+    try {
+      // Strip markdown code fences if present
+      const cleaned = raw.replace(/```(?:json)?\n?/g, '').trim();
+      const match = cleaned.match(/\[[\s\S]*\]/);
+      if (match) items = JSON.parse(match[0]);
+    } catch (e) { console.error('[parent-bot] JSON parse error:', e); }
+    if (items.length === 0) {
+      console.error('[parent-bot] No items parsed from:', raw.substring(0, 300));
+      return NextResponse.json({ reply: 'לא מצאתי משימות במסמך. נסה שוב.' });
+    }
 
     let createdTasks = 0, createdSlots = 0;
     for (const item of items) {
