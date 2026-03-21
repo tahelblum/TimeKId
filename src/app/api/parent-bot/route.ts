@@ -108,7 +108,7 @@ If no date given for task, use tomorrow at 15:00. If no time given for schedule,
     } catch (e) { console.error('[parent-bot] JSON parse error:', e); }
     if (items.length === 0) {
       console.error('[parent-bot] No items parsed from:', raw.substring(0, 300));
-      return NextResponse.json({ reply: `DEBUG: ${raw.substring(0, 400)}` });
+      return NextResponse.json({ reply: 'לא מצאתי משימות במסמך. נסה שוב.' });
     }
 
     let createdTasks = 0, createdSlots = 0;
