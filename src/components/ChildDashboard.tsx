@@ -174,7 +174,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
   const [currentDate, setCurrentDate] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; });
   const calBodyRef = useRef<HTMLDivElement>(null);
 
-  const [activeModal, setActiveModal] = useState<null | 'bot' | 'document' | 'compliment' | 'reminder' | 'secondary' | 'study-planner'>(null);
+  const [activeModal, setActiveModal] = useState<null | 'bot' | 'document' | 'compliment' | 'reminder' | 'secondary' | 'study-planner' | 'add-task'>(null);
   const [upcomingTests, setUpcomingTests] = useState<Task[]>([]);
   const [selectedTest, setSelectedTest] = useState<Task | null>(null);
   const [studyPlan, setStudyPlan] = useState<StudyPlan | null>(null);
@@ -190,6 +190,13 @@ export default function ChildDashboard({ childId }: { childId: number }) {
   const [botFile, setBotFile] = useState<File | null>(null);
   const botFileRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Add-task form
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskType, setNewTaskType] = useState<'homework' | 'test' | 'activity' | 'other'>('homework');
+  const [newTaskDate, setNewTaskDate] = useState('');
+  const [newTaskTime, setNewTaskTime] = useState('15:00');
+  const [newTaskDesc, setNewTaskDesc] = useState('');
 
   // Modals
   const [actionLoading, setActionLoading] = useState(false);
@@ -448,6 +455,24 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     } catch {} finally { setStudyPlanLoading(false); }
   }
 
+  async function submitNewTask() {
+    if (!newTaskTitle.trim() || !newTaskDate) return;
+    setActionLoading(true);
+    try {
+      const due_ts = new Date(`${newTaskDate}T${newTaskTime}:00`).getTime();
+      const res = await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.CREATE_TASK(childId)}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newTaskTitle.trim(), type: newTaskType, due_date: due_ts, description: newTaskDesc.trim(), status: 'pending' }),
+      });
+      if (!res.ok) throw new Error();
+      setActionSuccess('המשימה נוספה בהצלחה!');
+      setNewTaskTitle(''); setNewTaskType('homework'); setNewTaskDate(''); setNewTaskTime('15:00'); setNewTaskDesc('');
+      fetchWeekData(true);
+    } catch { setActionSuccess('שגיאה בהוספת המשימה.'); }
+    finally { setActionLoading(false); }
+  }
+
   function closeModal() { setActiveModal(null); setActionSuccess(''); setActionLoading(false); }
 
   const navDate = (delta: number) => setCurrentDate(prev => { const d = new Date(prev); d.setDate(d.getDate() + delta); return d; });
@@ -643,6 +668,9 @@ export default function ChildDashboard({ childId }: { childId: number }) {
         <button className="fab-btn fab-bot" onClick={() => { setActionSuccess(''); setActiveModal('bot'); }}>
           <Bot size={22} /><span>בוט</span>
         </button>
+        <button className="fab-btn fab-add" onClick={() => { setActionSuccess(''); setActiveModal('add-task'); }}>
+          <Edit3 size={22} /><span>משימה</span>
+        </button>
 
         <button className="fab-btn fab-star" onClick={() => { setActionSuccess(''); setActiveModal('compliment'); }}>
           <Star size={22} /><span>מחמאה</span>
@@ -692,6 +720,53 @@ export default function ChildDashboard({ childId }: { childId: number }) {
                     onKeyDown={e => e.key === 'Enter' && (botFile ? sendBotFile() : sendBotMessage())} />
                   <button className="chat-send" onClick={botFile ? sendBotFile : sendBotMessage} disabled={botLoading}><Send size={18} /></button>
                 </div>
+              </>
+            )}
+
+            {/* Add Task */}
+            {activeModal === 'add-task' && (
+              <>
+                <div className="modal-header">
+                  <div className="modal-icon" style={{ background: 'var(--color-primary)' }}><Edit3 size={28} color="white" /></div>
+                  <h2 className="modal-title">הוסף משימה</h2>
+                  <p className="modal-sub">הוסף משימה ישירות ללוח השנה</p>
+                </div>
+                {actionSuccess ? <div className="success-box">{actionSuccess}</div> : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div className="form-field">
+                      <label className="form-label">כותרת *</label>
+                      <input className="form-input" type="text" placeholder="לדוגמה: שיעורי בית במתמטיקה"
+                        value={newTaskTitle} onChange={e => setNewTaskTitle(e.target.value)} />
+                    </div>
+                    <div className="form-field">
+                      <label className="form-label">סוג</label>
+                      <select className="form-input" value={newTaskType} onChange={e => setNewTaskType(e.target.value as typeof newTaskType)}>
+                        <option value="homework">שיעורי בית</option>
+                        <option value="test">מבחן</option>
+                        <option value="activity">פעילות</option>
+                        <option value="other">אחר</option>
+                      </select>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <div className="form-field" style={{ flex: 2 }}>
+                        <label className="form-label">תאריך *</label>
+                        <input className="form-input" type="date" value={newTaskDate} onChange={e => setNewTaskDate(e.target.value)} />
+                      </div>
+                      <div className="form-field" style={{ flex: 1 }}>
+                        <label className="form-label">שעה</label>
+                        <input className="form-input" type="time" value={newTaskTime} onChange={e => setNewTaskTime(e.target.value)} />
+                      </div>
+                    </div>
+                    <div className="form-field">
+                      <label className="form-label">תיאור (אופציונלי)</label>
+                      <input className="form-input" type="text" placeholder="פרטים נוספים..."
+                        value={newTaskDesc} onChange={e => setNewTaskDesc(e.target.value)} />
+                    </div>
+                    <button className="btn-primary" onClick={submitNewTask} disabled={actionLoading || !newTaskTitle.trim() || !newTaskDate}>
+                      {actionLoading ? '...' : 'הוסף משימה'}
+                    </button>
+                  </div>
+                )}
               </>
             )}
 

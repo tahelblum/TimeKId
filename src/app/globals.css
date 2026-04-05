@@ -378,6 +378,7 @@ body {
 .fab-doc { background: linear-gradient(135deg, #74B9FF, #6BCB77); }
 .fab-star { background: linear-gradient(135deg, #FFD93D, #FF6B6B); }
 .fab-bell { background: linear-gradient(135deg, #6BCB77, #74B9FF); }
+.fab-add  { background: linear-gradient(135deg, #FF6B6B, #FFD93D); }
 
 /* MODAL */
 .modal-overlay {
