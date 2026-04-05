@@ -34,17 +34,19 @@ A document can contain ONE or MORE of the following:
 2. TEST/EXAM SCHEDULE — upcoming tests (מבחנים, בחינות, בוחנים). Extract each as a task with type "test".
 3. HOMEWORK or ONE-TIME TASKS — single assignments. Extract as tasks.
 
+CRITICAL: Extract ONLY what is explicitly written in the document. Do NOT guess, infer, or add any subjects, dates, or items that are not clearly stated in the text or image. If a cell is empty or unclear, skip it entirely.
+
 Return ONLY a raw JSON array (no markdown, no explanation):
 
 Schedule slot shape:
-{ "kind": "schedule", "subject": "<Hebrew subject name>", "day_of_week": "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday", "start_time": "HH:MM", "end_time": "HH:MM" }
+{ "kind": "schedule", "subject": "<exact Hebrew subject name as written>", "day_of_week": "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday", "start_time": "HH:MM", "end_time": "HH:MM" }
 
 Task shape:
 { "kind": "task", "title": "<Hebrew title>", "type": "test|homework|activity|other", "due_date": "YYYY-MM-DDTHH:mm:ss", "description": "" }
 
 Rules:
 - Day names in Hebrew: ראשון→Sunday, שני→Monday, שלישי→Tuesday, רביעי→Wednesday, חמישי→Thursday, שישי→Friday
-- If a document has a weekly grid → emit schedule slots (one per subject per day)
+- If a document has a weekly grid → emit schedule slots (one per subject per day). Skip empty cells.
 - Tests/exams (מבחן, בחינה, בוחן, מבדק, שכבתי) → task with type "test"
 - If no date given for a test → estimate based on context, default to two weeks from today
 - Today is ${today}. Current year: ${new Date().getFullYear()}.`;

@@ -72,10 +72,11 @@ export async function DELETE(req: NextRequest) {
 }
 
 const SCHEDULE_SYSTEM = `You are a helper that parses Israeli school timetables (Hebrew or English).
-Extract ALL schedule slots and return ONLY a JSON array. Each slot:
-{ "day_of_week": "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday", "Subject": "<subject in Hebrew>", "start_time": "HH:MM", "endtime": "HH:MM" }
+Extract schedule slots and return ONLY a JSON array. Each slot:
+{ "day_of_week": "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday", "Subject": "<exact subject name in Hebrew as written>", "start_time": "HH:MM", "endtime": "HH:MM" }
 Hebrew days: ראשון=Sunday, שני=Monday, שלישי=Tuesday, רביעי=Wednesday, חמישי=Thursday, שישי=Friday
-If end time not given, add 45 minutes. Return ONLY the JSON array, no explanation.`;
+If end time not given, add 45 minutes.
+IMPORTANT: Extract ONLY subjects that are explicitly written. Do NOT invent or guess any subjects. Skip empty cells. Return ONLY the JSON array, no explanation.`;
 
 // POST /api/schedule — parse schedule text/image + replace all slots
 // Body: { text?, image_base64?, image_type?, childId, authToken }
