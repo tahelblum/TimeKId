@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   CheckCircle2, Circle, Clock, X, Send,
   Bot, ChevronLeft, ChevronRight,
-  Edit3, LogOut, BookOpen, Zap, Play, Pause, Target,
+  Edit3, LogOut, BookOpen, Zap, Play, Pause, Target, Upload, FileText,
 } from 'lucide-react';
 import { API_URL, API_ENDPOINTS } from '@/lib/api';
 
@@ -320,6 +320,14 @@ export default function KidDashboard() {
   const [schoolLoading, setSchoolLoading] = useState(false);
   const [schoolText, setSchoolText] = useState('');
   const [schoolParseError, setSchoolParseError] = useState('');
+  const schoolFileRef = useRef<HTMLInputElement>(null);
+
+  // Exams modal
+  const [showExamsModal, setShowExamsModal] = useState(false);
+  const [examsText, setExamsText] = useState('');
+  const [examsLoading, setExamsLoading] = useState(false);
+  const [examsResult, setExamsResult] = useState('');
+  const examsFileRef = useRef<HTMLInputElement>(null);
 
   // Drag & drop
   const [dragOverCell, setDragOverCell] = useState<{ di: number; hour: number } | null>(null);
@@ -504,6 +512,87 @@ export default function KidDashboard() {
     });
     setSchoolGrid(grid);
     setShowSchoolModal(true);
+  }
+
+  async function readFileAsPayload(file: File): Promise<{ text?: string; image_base64?: string; image_type?: string }> {
+    if (file.type.startsWith('image/')) {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      return { image_base64: base64, image_type: file.type };
+    }
+    const text = (await file.text()).substring(0, 8000);
+    return { text };
+  }
+
+  async function parseSchoolFile(file: File) {
+    setSchoolLoading(true);
+    setSchoolParseError('');
+    try {
+      const payload = await readFileAsPayload(file);
+      const res = await fetch('/api/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, childId: child?.id, authToken }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSchoolParseError(data.error || 'שגיאה בניתוח הקובץ');
+      } else {
+        const grid: Record<string, string> = {};
+        const newSlots: ScheduleSlot[] = (data.slots ?? []) as ScheduleSlot[];
+        newSlots.forEach(slot => {
+          const dayNum = DAY_OF_WEEK_NUM[slot.day_of_week || ''];
+          if (dayNum !== undefined && dayNum <= 4) {
+            const hour = parseTimeHour(slot.start_time || '');
+            if (SCHOOL_PERIODS.includes(hour)) grid[`${dayNum}-${hour}`] = slot.Subject || '';
+          }
+        });
+        setScheduleSlots(newSlots);
+        setSchoolGrid(grid);
+        setShowSchoolModal(false);
+        if (kidDataCache) kidDataCache = null;
+        fetchWeekData(true);
+      }
+    } catch { setSchoolParseError('שגיאת רשת'); }
+    finally { setSchoolLoading(false); }
+  }
+
+  async function parseExamsFile(file: File) {
+    setExamsLoading(true);
+    setExamsResult('');
+    try {
+      const payload = await readFileAsPayload(file);
+      const res = await fetch('/api/exams-parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, childId: child?.id, authToken }),
+      });
+      const data = await res.json();
+      if (!res.ok) setExamsResult(data.error || 'שגיאה');
+      else { setExamsResult(`✅ נוספו ${data.created} מבחנים!`); if (kidDataCache) kidDataCache = null; fetchWeekData(true); }
+    } catch { setExamsResult('שגיאת רשת'); }
+    finally { setExamsLoading(false); }
+  }
+
+  async function parseExamsText() {
+    if (!examsText.trim()) return;
+    setExamsLoading(true);
+    setExamsResult('');
+    try {
+      const res = await fetch('/api/exams-parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: examsText, childId: child?.id, authToken }),
+      });
+      const data = await res.json();
+      if (!res.ok) setExamsResult(data.error || 'שגיאה');
+      else { setExamsResult(`✅ נוספו ${data.created} מבחנים!`); setExamsText(''); if (kidDataCache) kidDataCache = null; fetchWeekData(true); }
+    } catch { setExamsResult('שגיאת רשת'); }
+    finally { setExamsLoading(false); }
   }
 
   async function parseSchoolText() {
@@ -898,6 +987,9 @@ export default function KidDashboard() {
         <button className="kid-fab kid-fab-school" onClick={openSchoolModal}>
           <BookOpen size={22} /><span>מערכת</span>
         </button>
+        <button className="kid-fab kid-fab-exams" onClick={() => { setExamsResult(''); setShowExamsModal(true); }}>
+          <FileText size={22} /><span>מבחנים</span>
+        </button>
         <button className="kid-fab kid-fab-chat" onClick={() => setShowChat(true)}>
           <Bot size={22} /><span>צ&apos;אט</span>
         </button>
@@ -1069,7 +1161,14 @@ export default function KidDashboard() {
               <p className="modal-sub">הכנס את השיעורים שלך לשבוע הנוכחי — הם יסתמנו אוטומטית כשיסתיימו</p>
             </div>
             <div style={{ marginBottom: 16 }}>
-              <p style={{ fontSize: 13, color: '#6C63FF', fontWeight: 600, marginBottom: 6 }}>הדבק מערכת שעות כטקסט (אוטומטי):</p>
+              <p style={{ fontSize: 13, color: '#6C63FF', fontWeight: 600, marginBottom: 6 }}>העלה קובץ או תמונה:</p>
+              <input ref={schoolFileRef} type="file" accept=".txt,.pdf,.doc,.docx,.png,.jpg,.jpeg" style={{ display: 'none' }}
+                onChange={e => { const f = e.target.files?.[0]; if (f) { parseSchoolFile(f); if (schoolFileRef.current) schoolFileRef.current.value = ''; } }} />
+              <button className="btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                onClick={() => schoolFileRef.current?.click()} disabled={schoolLoading}>
+                <Upload size={16} />{schoolLoading ? 'מנתח...' : 'העלה מערכת שעות מקובץ / תמונה'}
+              </button>
+              <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: 12, margin: '10px 0' }}>— או הדבק טקסט —</p>
               <textarea
                 rows={4}
                 style={{ width: '100%', borderRadius: 10, border: '1.5px solid #e2e8f0', padding: '8px 12px', fontSize: 13, resize: 'vertical', direction: 'rtl', fontFamily: 'Nunito, sans-serif' }}
@@ -1120,6 +1219,46 @@ export default function KidDashboard() {
               disabled={schoolLoading || !Object.values(schoolGrid).some(v => v.trim())}>
               {schoolLoading ? 'יוצר שיעורים...' : 'טען מערכת שעות ✅'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── EXAMS MODAL ── */}
+      {showExamsModal && (
+        <div className="modal-overlay" onClick={() => { setShowExamsModal(false); setExamsResult(''); }}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => { setShowExamsModal(false); setExamsResult(''); }}><X size={20} /></button>
+            <div className="modal-header">
+              <div className="modal-icon" style={{ background: 'linear-gradient(135deg, #FF6B6B, #FFD93D)' }}>
+                <FileText size={28} color="white" />
+              </div>
+              <h2 className="modal-title">טעינת מבחנים</h2>
+              <p className="modal-sub">העלה לוח מבחנים מקובץ או הדבק כטקסט</p>
+            </div>
+            {examsResult ? (
+              <div className={examsResult.startsWith('✅') ? 'success-box' : 'error-box'}>{examsResult}</div>
+            ) : (
+              <>
+                <input ref={examsFileRef} type="file" accept=".txt,.pdf,.doc,.docx,.png,.jpg,.jpeg" style={{ display: 'none' }}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) { parseExamsFile(f); if (examsFileRef.current) examsFileRef.current.value = ''; } }} />
+                <button className="btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12 }}
+                  onClick={() => examsFileRef.current?.click()} disabled={examsLoading}>
+                  <Upload size={16} />{examsLoading ? 'מנתח...' : 'העלה לוח מבחנים מקובץ / תמונה'}
+                </button>
+                <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: 12, margin: '4px 0 10px' }}>— או הדבק טקסט —</p>
+                <textarea
+                  rows={5}
+                  style={{ width: '100%', borderRadius: 10, border: '1.5px solid #e2e8f0', padding: '8px 12px', fontSize: 13, resize: 'vertical', direction: 'rtl', fontFamily: 'Nunito, sans-serif' }}
+                  placeholder={'מתמטיקה - 15/05/2026\nאנגלית - 20/05/2026 שעה 09:00\n...'}
+                  value={examsText}
+                  onChange={e => setExamsText(e.target.value)}
+                />
+                <button className="btn-primary" style={{ marginTop: 8, width: '100%' }}
+                  onClick={parseExamsText} disabled={examsLoading || !examsText.trim()}>
+                  {examsLoading ? 'מנתח...' : 'נתח ושמור מבחנים ✨'}
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

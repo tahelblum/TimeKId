@@ -71,8 +71,14 @@ export async function DELETE(req: NextRequest) {
   return NextResponse.json({ deleted: toDelete.length });
 }
 
-// POST /api/schedule — parse schedule text + replace all slots
-// Body: { text, childId, authToken }
+const SCHEDULE_SYSTEM = `You are a helper that parses Israeli school timetables (Hebrew or English).
+Extract ALL schedule slots and return ONLY a JSON array. Each slot:
+{ "day_of_week": "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday", "Subject": "<subject in Hebrew>", "start_time": "HH:MM", "endtime": "HH:MM" }
+Hebrew days: ראשון=Sunday, שני=Monday, שלישי=Tuesday, רביעי=Wednesday, חמישי=Thursday, שישי=Friday
+If end time not given, add 45 minutes. Return ONLY the JSON array, no explanation.`;
+
+// POST /api/schedule — parse schedule text/image + replace all slots
+// Body: { text?, image_base64?, image_type?, childId, authToken }
 export async function POST(req: NextRequest) {
   const metaToken = process.env.XANO_META_TOKEN;
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
@@ -80,14 +86,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'server misconfigured' }, { status: 500 });
   }
 
-  const { text, childId, authToken } = await req.json() as {
-    text: string; childId: number; authToken: string;
+  const { text, image_base64, image_type, childId, authToken } = await req.json() as {
+    text?: string; image_base64?: string; image_type?: string; childId: number; authToken: string;
   };
-  if (!text || !childId || !authToken) {
+  if ((!text && !image_base64) || !childId || !authToken) {
     return NextResponse.json({ error: 'missing fields' }, { status: 400 });
   }
 
-  // Parse schedule text with Claude
+  const userContent = image_base64
+    ? [
+        { type: 'image', source: { type: 'base64', media_type: image_type || 'image/jpeg', data: image_base64 } },
+        { type: 'text', text: 'Extract all schedule slots from this school timetable image. Return JSON array only.' },
+      ]
+    : (text ?? '').substring(0, 8000);
+
+  // Parse with Claude
   const aiRes = await fetch(ANTHROPIC_API, {
     method: 'POST',
     headers: {
@@ -97,15 +110,9 @@ export async function POST(req: NextRequest) {
     },
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1000,
-      system: `You are a helper that parses school schedule text written in Hebrew or English.
-Extract all schedule slots and return ONLY a JSON array. Each slot:
-{ "day_of_week": "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday", "Subject": "<subject name in Hebrew>", "start_time": "HH:MM", "endtime": "HH:MM" }
-
-Hebrew day names: ראשון=Sunday, שני=Monday, שלישי=Tuesday, רביעי=Wednesday, חמישי=Thursday, שישי=Friday
-If end time is not given, add 1 hour.
-Return ONLY the JSON array, no explanation.`,
-      messages: [{ role: 'user', content: text }],
+      max_tokens: 1500,
+      system: SCHEDULE_SYSTEM,
+      messages: [{ role: 'user', content: userContent }],
     }),
   });
 

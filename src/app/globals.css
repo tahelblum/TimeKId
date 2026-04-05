@@ -1253,6 +1253,7 @@ body {
 
 /* ── SCHOOL FAB ───────────────────────────────────────────────────────────── */
 .kid-fab-school { background: linear-gradient(135deg, #6C63FF, #A29BFE); }
+.kid-fab-exams  { background: linear-gradient(135deg, #FF6B6B, #FFD93D); }
 
 /* ── SCHOOL SCHEDULE MODAL ────────────────────────────────────────────────── */
 .modal-wide { max-width: 620px !important; width: 96vw !important; }
