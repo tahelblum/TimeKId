@@ -19,7 +19,8 @@ Rules:
 export async function POST(req: NextRequest) {
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (!anthropicKey) {
-    return NextResponse.json({ error: 'server misconfigured' }, { status: 500 });
+    console.error('[exams-parse] ANTHROPIC_API_KEY not set');
+    return NextResponse.json({ error: 'מפתח AI חסר בשרת' }, { status: 500 });
   }
 
   const { text, image_base64, image_type, childId, authToken } = await req.json() as {
@@ -51,8 +52,8 @@ export async function POST(req: NextRequest) {
 
   if (!aiRes.ok) {
     const err = await aiRes.text();
-    console.error('[exams-parse] AI error:', aiRes.status, err.substring(0, 200));
-    return NextResponse.json({ error: `AI error ${aiRes.status}` }, { status: 500 });
+    console.error('[exams-parse] AI error:', aiRes.status, err.substring(0, 300));
+    return NextResponse.json({ error: `שגיאת AI (${aiRes.status}): ${err.substring(0, 150)}` }, { status: 500 });
   }
 
   const aiData = await aiRes.json();
