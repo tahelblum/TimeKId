@@ -1,4 +1,5 @@
 export const API_URL = 'https://x8ki-letl-twmt.n7.xano.io/api:UgeJ6dlR';
+export const PARENT_API_URL = 'https://x8ki-letl-twmt.n7.xano.io/api:Zzvyj0oH:v1';
 
 export const API_ENDPOINTS = {
   AUTH: {

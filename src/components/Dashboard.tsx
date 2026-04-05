@@ -3,7 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { LogOut, UserPlus, Users } from 'lucide-react';
-import { API_URL, API_ENDPOINTS } from '@/lib/api';
+import { PARENT_API_URL } from '@/lib/api';
 
 interface Child {
   id: number;
@@ -28,7 +28,7 @@ export default function Dashboard() {
   async function fetchChildren() {
     setChildrenLoading(true);
     try {
-      const res = await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.LIST}`, {
+      const res = await fetch(`${PARENT_API_URL}/manage_children/get`, {
         headers: { 'Authorization': `Bearer ${authToken}` },
       });
       if (!res.ok) throw new Error();
