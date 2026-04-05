@@ -124,6 +124,7 @@ interface ChildDataCache {
   fetchedAt: number;
 }
 const childDataCache: Record<number, ChildDataCache> = {};
+const childFetchInFlight: Record<number, boolean> = {};
 
 function weekStart(d: Date): Date {
   const r = new Date(d); r.setDate(r.getDate() - r.getDay()); r.setHours(0, 0, 0, 0); return r;
@@ -239,6 +240,10 @@ export default function ChildDashboard({ childId }: { childId: number }) {
       return;
     }
 
+    // Prevent concurrent fetches for the same child
+    if (childFetchInFlight[childId]) return;
+    childFetchInFlight[childId] = true;
+
     setTasksLoading(true);
     const auth = { 'Authorization': `Bearer ${authToken}` };
     try {
@@ -253,7 +258,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
       const slots: ScheduleSlot[] = slotsRes?.ok ? toAnyArray(await slotsRes.json()) as ScheduleSlot[] : [];
       childDataCache[childId] = { tasks, exams, slots, fetchedAt: now };
       applyWeekView(childDataCache[childId], days);
-    } catch { setWeekAllTasks([]); } finally { setTasksLoading(false); }
+    } catch { setWeekAllTasks([]); } finally { setTasksLoading(false); childFetchInFlight[childId] = false; }
   }, [currentDate, childId, authToken]);
 
   useEffect(() => {

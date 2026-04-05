@@ -6,12 +6,23 @@ const SCHEDULE_TABLE = 714667;
 const ANTHROPIC_API  = 'https://api.anthropic.com/v1/messages';
 
 async function metaInsert(metaToken: string, tableId: number, data: Record<string, unknown>) {
-  const res = await fetch(`${XANO_META}/table/${tableId}/content`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${metaToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  return res.ok ? await res.json() : null;
+  try {
+    const res = await fetch(`${XANO_META}/table/${tableId}/content`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${metaToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.error(`[metaInsert] table ${tableId} failed ${res.status}:`, errText.substring(0, 300));
+      return null;
+    }
+    const text = await res.text();
+    try { return JSON.parse(text); } catch { return text || true; }
+  } catch (e) {
+    console.error(`[metaInsert] table ${tableId} threw:`, e);
+    return null;
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -114,7 +125,7 @@ If no date given for task, use tomorrow at 15:00. If no time given for schedule,
     let createdTasks = 0, createdSlots = 0;
     for (const item of items) {
       if (item.kind === 'schedule') {
-        const rec = await metaInsert(metaToken, SCHEDULE_TABLE, {
+        const insertData = {
           Subject: item.subject || 'שיעור',
           day_of_week: item.day_of_week || 'Sunday',
           start_time: item.start_time || '08:00',
@@ -122,8 +133,11 @@ If no date given for task, use tomorrow at 15:00. If no time given for schedule,
           created_by_role: 'parent',
           user_id: child_id,
           children_id: child_id,
-        });
+        };
+        console.log('[parent-bot] inserting schedule slot:', JSON.stringify(insertData));
+        const rec = await metaInsert(metaToken, SCHEDULE_TABLE, insertData);
         if (rec) createdSlots++;
+        else console.error('[parent-bot] schedule insert returned null for:', insertData);
       } else {
         const due_ts = new Date(item.due_date || `${today}T15:00:00`).getTime();
         const rec = await metaInsert(metaToken, TASK_TABLE, {
