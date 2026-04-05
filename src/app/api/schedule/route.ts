@@ -117,23 +117,26 @@ export async function POST(req: NextRequest) {
   });
 
   if (!aiRes.ok) {
-    console.error('[/api/schedule POST] Claude error:', aiRes.status);
-    return NextResponse.json({ error: 'AI parsing failed' }, { status: 500 });
+    const err = await aiRes.text();
+    console.error('[/api/schedule POST] Claude error:', aiRes.status, err.substring(0, 200));
+    return NextResponse.json({ error: `שגיאת AI (${aiRes.status}): ${err.substring(0, 100)}` }, { status: 500 });
   }
 
   const aiData = await aiRes.json();
-  const raw = aiData?.content?.[0]?.text ?? '';
+  const raw = (aiData?.content?.[0]?.text ?? '').trim();
+  console.log('[/api/schedule POST] AI raw:', raw.substring(0, 400));
   let slots: Array<{ day_of_week: string; Subject: string; start_time: string; endtime: string }> = [];
   try {
-    const match = raw.match(/\[[\s\S]*\]/);
+    const cleaned = raw.replace(/```(?:json)?\n?/g, '').trim();
+    const match = cleaned.match(/\[[\s\S]*\]/);
     if (match) slots = JSON.parse(match[0]);
   } catch {
     console.error('[/api/schedule POST] parse error, raw:', raw.substring(0, 200));
-    return NextResponse.json({ error: 'Could not parse AI response' }, { status: 422 });
+    return NextResponse.json({ error: 'לא הצלחתי לקרוא את התגובה מה-AI' }, { status: 422 });
   }
 
   if (slots.length === 0) {
-    return NextResponse.json({ error: 'No slots found in text' }, { status: 422 });
+    return NextResponse.json({ error: 'לא נמצאו שיעורים בקובץ. ודא שמדובר במערכת שעות שבועית.' }, { status: 422 });
   }
 
   // Delete existing slots
