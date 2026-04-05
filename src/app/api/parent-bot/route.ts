@@ -124,8 +124,8 @@ export async function POST(req: NextRequest) {
 
     if (!aiRes.ok) {
       const errBody = await aiRes.text();
-      console.error('[parent-bot] AI error:', aiRes.status, errBody.substring(0, 300));
-      return NextResponse.json({ reply: `שגיאת AI (${aiRes.status}).` }, { status: 500 });
+      console.error('[parent-bot] AI error:', aiRes.status, errBody.substring(0, 500));
+      return NextResponse.json({ reply: `שגיאת AI (${aiRes.status}): ${errBody.substring(0, 200)}` }, { status: 500 });
     }
 
     const aiData = await aiRes.json();
