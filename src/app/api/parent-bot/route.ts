@@ -5,6 +5,31 @@ const TASK_TABLE     = 683759;
 const SCHEDULE_TABLE = 714667;
 const ANTHROPIC_API  = 'https://api.anthropic.com/v1/messages';
 
+async function deleteExistingSlots(metaToken: string, childId: number) {
+  try {
+    let page = 1;
+    const toDelete: number[] = [];
+    while (true) {
+      const res = await fetch(`${XANO_META}/table/${SCHEDULE_TABLE}/content?page=${page}&per_page=100`, {
+        headers: { Authorization: `Bearer ${metaToken}` },
+      });
+      if (!res.ok) break;
+      const data = await res.json() as { items?: Record<string, unknown>[]; nextPage?: number | null } | Record<string, unknown>[];
+      const batch = Array.isArray(data) ? data : ((data as { items?: Record<string, unknown>[] }).items ?? []);
+      batch.filter(s => s.user_id === childId || s.children_id === childId).forEach(s => toDelete.push(s.id as number));
+      const next = Array.isArray(data) ? null : (data as { nextPage?: number | null }).nextPage;
+      if (!next) break;
+      page++;
+    }
+    await Promise.all(toDelete.map(id =>
+      fetch(`${XANO_META}/table/${SCHEDULE_TABLE}/content/${id}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${metaToken}` },
+      })
+    ));
+    console.log(`[parent-bot] deleted ${toDelete.length} existing slots for child ${childId}`);
+  } catch (e) { console.error('[parent-bot] deleteExistingSlots error:', e); }
+}
+
 async function metaInsert(metaToken: string, tableId: number, data: Record<string, unknown>) {
   try {
     const res = await fetch(`${XANO_META}/table/${tableId}/content`, {
@@ -34,12 +59,15 @@ A document can contain ONE or MORE of the following:
 2. TEST/EXAM SCHEDULE — upcoming tests (מבחנים, בחינות, בוחנים). Extract each as a task with type "test".
 3. HOMEWORK or ONE-TIME TASKS — single assignments. Extract as tasks.
 
-CRITICAL: Extract ONLY what is explicitly written in the document. Do NOT guess, infer, or add any subjects, dates, or items that are not clearly stated in the text or image. If a cell is empty or unclear, skip it entirely.
+CRITICAL RULES:
+- Extract ONLY what is explicitly written. Do NOT guess, infer, or hallucinate any subjects or dates.
+- Copy subject names EXACTLY as they appear in the document — do NOT translate them to Hebrew or English.
+- If a cell is empty or unreadable, skip it entirely.
 
 Return ONLY a raw JSON array (no markdown, no explanation):
 
 Schedule slot shape:
-{ "kind": "schedule", "subject": "<exact Hebrew subject name as written>", "day_of_week": "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday", "start_time": "HH:MM", "end_time": "HH:MM" }
+{ "kind": "schedule", "subject": "<copy subject name exactly as written>", "day_of_week": "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday", "start_time": "HH:MM", "end_time": "HH:MM" }
 
 Task shape:
 { "kind": "task", "title": "<Hebrew title>", "type": "test|homework|activity|other", "due_date": "YYYY-MM-DDTHH:mm:ss", "description": "" }
@@ -148,6 +176,10 @@ export async function POST(req: NextRequest) {
         console.error('[parent-bot] No items from AI. Raw:', raw.substring(0, 300));
         return NextResponse.json({ reply: 'לא הצלחתי לזהות משימות או שיעורים במסמך. נסה שנית.' });
       }
+
+      // If any schedule slots in the doc, delete existing ones first to avoid duplicates
+      const hasSchedule = items.some(i => i.kind === 'schedule');
+      if (hasSchedule) await deleteExistingSlots(metaToken, child_id);
 
       let createdTasks = 0, createdSlots = 0;
       for (const item of items) {
