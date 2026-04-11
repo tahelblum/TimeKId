@@ -735,10 +735,16 @@ export default function KidDashboard() {
     ? weekAllTasks.filter(t => sameDay(new Date(t.due_date * 1000), currentDate))
     : weekAllTasks;
   const visibleTasks = sortByUrgency(rawVisible);
+
+  // All real (non-virtual) tasks — used for the task lists regardless of day/week view
+  const allRealTasks = sortByUrgency(weekAllTasks.filter(t => !(t as Task & { _virtual?: boolean })._virtual));
+  const allPending = allRealTasks.filter(t => t.status !== 'done');
+  const allDone = allRealTasks.filter(t => t.status === 'done');
+
   const doneCnt = visibleTasks.filter(t => t.status === 'done').length;
   const pendingTasks = visibleTasks.filter(t => t.status !== 'done');
   const upcomingTests = weekAllTasks.filter(t => isTest(t) && t.status !== 'done' && daysUntil(t.due_date) >= 0);
-  const heroTask = pendingTasks.find(t => !(t as Task & { _virtual?: boolean })._virtual) || null;
+  const heroTask = allPending[0] || null;
 
   const dateLabel = view === 'day'
     ? `${HEBREW_DAYS[currentDate.getDay()]}, ${currentDate.getDate()} ${HEBREW_MONTHS[currentDate.getMonth()]}`
@@ -835,22 +841,22 @@ export default function KidDashboard() {
         )}
 
         {/* ── PROGRESS BAR ── */}
-        {visibleTasks.length > 0 && (
+        {allRealTasks.length > 0 && (
           <div className="kid-progress-wrap">
             <div className="kid-progress-label">
-              <span>{doneCnt} / {visibleTasks.length} הושלמו</span>
-              <span>{Math.round((doneCnt / visibleTasks.length) * 100)}%</span>
+              <span>{allDone.length} / {allRealTasks.length} הושלמו</span>
+              <span>{Math.round((allDone.length / allRealTasks.length) * 100)}%</span>
             </div>
             <div className="kid-progress-bar">
-              <div className="kid-progress-fill" style={{ width: `${(doneCnt / visibleTasks.length) * 100}%` }} />
+              <div className="kid-progress-fill" style={{ width: `${(allDone.length / allRealTasks.length) * 100}%` }} />
             </div>
           </div>
         )}
 
         {/* ── PENDING TASKS LIST ── */}
-        {pendingTasks.filter(t => !(t as Task & { _virtual?: boolean })._virtual).length > 0 && (
+        {allPending.length > 0 && (
           <div className="pending-tasks-list">
-            {pendingTasks.filter(t => !(t as Task & { _virtual?: boolean })._virtual).map(task => {
+            {allPending.map(task => {
               const uk = urgencyKey(task.due_date, task.status);
               return (
                 <div key={task.id} className={`pending-task-row urgency-row-${uk}`}>
@@ -875,16 +881,16 @@ export default function KidDashboard() {
         )}
 
         {/* ── COMPLETED TASKS LIST ── */}
-        {doneCnt > 0 && (
+        {allDone.length > 0 && (
           <div className="done-tasks-section">
             <button className="done-tasks-toggle" onClick={() => setShowDone(p => !p)}>
               <CheckCircle2 size={16} color="#6BCB77" />
-              <span>{doneCnt} משימות שהושלמו</span>
+              <span>{allDone.length} משימות שהושלמו</span>
               <span className="done-toggle-arrow">{showDone ? '▲' : '▼'}</span>
             </button>
             {showDone && (
               <div className="done-tasks-list">
-                {visibleTasks.filter(t => t.status === 'done' && !(t as Task & { _virtual?: boolean })._virtual).map(task => (
+                {allDone.map(task => (
                   <div key={task.id} className="done-task-row">
                     <span className="done-task-emoji">{typeEmoji(task.type)}</span>
                     <span className="done-task-title">{task.title}</span>
