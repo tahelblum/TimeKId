@@ -335,6 +335,9 @@ export default function KidDashboard() {
   const [dragOverCell, setDragOverCell] = useState<{ di: number; hour: number } | null>(null);
   const dragTaskId = useRef<number | null>(null);
 
+  // Completed tasks list toggle
+  const [showDone, setShowDone] = useState(false);
+
   // Quick-add task by clicking a calendar cell
   const [addTaskCell, setAddTaskCell] = useState<{ day: Date; hour: number } | null>(null);
   const [addTaskTitle, setAddTaskTitle] = useState('');
@@ -735,7 +738,7 @@ export default function KidDashboard() {
   const doneCnt = visibleTasks.filter(t => t.status === 'done').length;
   const pendingTasks = visibleTasks.filter(t => t.status !== 'done');
   const upcomingTests = weekAllTasks.filter(t => isTest(t) && t.status !== 'done' && daysUntil(t.due_date) >= 0);
-  const heroTask = pendingTasks[0] || null;
+  const heroTask = pendingTasks.find(t => !(t as Task & { _virtual?: boolean })._virtual) || null;
 
   const dateLabel = view === 'day'
     ? `${HEBREW_DAYS[currentDate.getDay()]}, ${currentDate.getDate()} ${HEBREW_MONTHS[currentDate.getMonth()]}`
@@ -841,6 +844,28 @@ export default function KidDashboard() {
             <div className="kid-progress-bar">
               <div className="kid-progress-fill" style={{ width: `${(doneCnt / visibleTasks.length) * 100}%` }} />
             </div>
+          </div>
+        )}
+
+        {/* ── COMPLETED TASKS LIST ── */}
+        {doneCnt > 0 && (
+          <div className="done-tasks-section">
+            <button className="done-tasks-toggle" onClick={() => setShowDone(p => !p)}>
+              <CheckCircle2 size={16} color="#6BCB77" />
+              <span>{doneCnt} משימות שהושלמו</span>
+              <span className="done-toggle-arrow">{showDone ? '▲' : '▼'}</span>
+            </button>
+            {showDone && (
+              <div className="done-tasks-list">
+                {visibleTasks.filter(t => t.status === 'done' && !(t as Task & { _virtual?: boolean })._virtual).map(task => (
+                  <div key={task.id} className="done-task-row">
+                    <span className="done-task-emoji">{typeEmoji(task.type)}</span>
+                    <span className="done-task-title">{task.title}</span>
+                    <button className="done-task-undo" onClick={() => toggleStatus(task)} title="בטל סימון">↩</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
