@@ -11,11 +11,15 @@ import {
 import { API_URL, API_ENDPOINTS } from '@/lib/api';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+const NOW_S = () => Math.floor(Date.now() / 1000);
+const MAX_FUTURE_S = 10 * 365 * 24 * 3600; // 10 years in seconds — anything beyond is likely corrupted
 const normalizeTasks = (arr: Task[]): Task[] => arr.map(t => {
   let due = t.due_date;
   if (!due && t.due_time) due = Math.floor(new Date(t.due_time + 'T12:00:00').getTime() / 1000);
   // Xano returns timestamps in milliseconds; convert to seconds for all calendar math
   if (due && due > 1e10) due = Math.floor(due / 1000);
+  // If still unreasonably far in the future (unit mismatch / AI hallucination), clear it
+  if (due && due - NOW_S() > MAX_FUTURE_S) due = 0;
   return { ...t, due_date: due || 0 };
 });
 const extractArray = (d: unknown): Task[] => {
@@ -187,6 +191,7 @@ function dateStrFromTs(ts: number) {
 }
 function urgencyKey(ts: number, status: Task['status']): 'done' | 'overdue' | 'today' | 'tomorrow' | 'soon' | 'later' {
   if (status === 'done') return 'done';
+  if (!ts) return 'later'; // no valid date — treat as non-urgent
   const d = daysUntil(ts);
   if (d < 0) return 'overdue';
   if (d === 0) return 'today';
@@ -195,6 +200,7 @@ function urgencyKey(ts: number, status: Task['status']): 'done' | 'overdue' | 't
   return 'later';
 }
 function relativeDate(ts: number): string {
+  if (!ts) return '📅 ללא תאריך';
   const d = daysUntil(ts);
   if (d < 0) return `⚠️ באיחור של ${-d} ${-d === 1 ? 'יום' : 'ימים'}`;
   if (d === 0) return '🔴 היום!';
