@@ -335,6 +335,12 @@ export default function KidDashboard() {
   const [dragOverCell, setDragOverCell] = useState<{ di: number; hour: number } | null>(null);
   const dragTaskId = useRef<number | null>(null);
 
+  // Quick-add task by clicking a calendar cell
+  const [addTaskCell, setAddTaskCell] = useState<{ day: Date; hour: number } | null>(null);
+  const [addTaskTitle, setAddTaskTitle] = useState('');
+  const [addTaskType, setAddTaskType] = useState<Task['type']>('homework');
+  const [addTaskLoading, setAddTaskLoading] = useState(false);
+
   // Calendar body ref for scrolling to current hour
   const calBodyRef = useRef<HTMLDivElement>(null);
   const ROW_HEIGHT = 56;
@@ -691,6 +697,33 @@ export default function KidDashboard() {
     fetchWeekData(true);
   }
 
+  async function submitAddTask() {
+    if (!addTaskCell || !addTaskTitle.trim()) return;
+    setAddTaskLoading(true);
+    const due_date = tsFromDateAndHour(dayStrOf(addTaskCell.day), addTaskCell.hour);
+    const title = addTaskTitle.trim();
+    const type = addTaskType;
+    const tmpId = -(Date.now());
+    const newTask: Task = { id: tmpId, title, description: '', due_date, status: 'pending', type };
+    setWeekAllTasks(prev => [...prev, newTask]);
+    setAddTaskCell(null);
+    setAddTaskTitle('');
+    setAddTaskType('homework');
+    try {
+      const res = await fetch(`${API_URL}${API_ENDPOINTS.CHILD.CREATE_TASK}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, type, due_date, description: '' }),
+      });
+      if (res.ok) {
+        const created = await res.json() as Task & { due_date: number };
+        const normalized = { ...created, due_date: created.due_date > 1e10 ? Math.floor(created.due_date / 1000) : created.due_date };
+        setWeekAllTasks(prev => prev.map(t => t.id === tmpId ? normalized : t));
+        if (kidDataCache) kidDataCache.tasks = [...kidDataCache.tasks.filter(t => t.id !== tmpId), normalized];
+      }
+    } catch {} finally { setAddTaskLoading(false); }
+  }
+
   // ─── Derived ───────────────────────────────────────────────────────────────
   const wDays = weekDays(currentDate);
   const today = new Date();
@@ -920,11 +953,11 @@ export default function KidDashboard() {
                           const uk = urgencyKey(task.due_date, task.status);
                           return (
                             <div key={task.id}
-                              className={`sc-event ev-${task.type} urgency-${uk}${task.status === 'done' ? ' ev-done' : ''}`}
-                              onClick={() => toggleStatus(task)}>
+                              className={`sc-event ev-${task.type} urgency-${uk}${task.status === 'done' ? ' ev-done' : ''}${(task as {_virtual?: boolean})._virtual ? ' ev-readonly' : ''}`}
+                              onClick={(task as {_virtual?: boolean})._virtual ? undefined : () => toggleStatus(task)}>
                               <span className="ev-emoji">{typeEmoji(task.type)}</span>
                               <span className={`ev-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
-                              <button className="ev-edit" onClick={e => openEdit(task, e)}><Edit3 size={10} /></button>
+                              {!(task as {_virtual?: boolean})._virtual && <button className="ev-edit" onClick={e => openEdit(task, e)}><Edit3 size={10} /></button>}
                             </div>
                           );
                         })}
@@ -952,19 +985,20 @@ export default function KidDashboard() {
                             onDrop={e => {
                               e.preventDefault(); setDragOverCell(null);
                               if (dragTaskId.current !== null) moveTaskToDayHour(dragTaskId.current, day, hour);
-                            }}>
+                            }}
+                            onClick={() => { setAddTaskCell({ day, hour }); setAddTaskTitle(''); setAddTaskType('homework'); }}>
                             {cellTasks.map(task => {
                               const uk = urgencyKey(task.due_date, task.status);
                               return (
                                 <div key={task.id}
-                                  draggable
-                                  onDragStart={e => { e.dataTransfer.setData('text/plain', String(task.id)); dragTaskId.current = task.id; }}
-                                  onDragEnd={() => { dragTaskId.current = null; setDragOverCell(null); }}
-                                  className={`sc-event ev-${task.type} urgency-${uk}${task.status === 'done' ? ' ev-done' : ''}${isTest(task) && task.status !== 'done' ? ' ev-test' : ''}`}
-                                  onClick={e => { e.stopPropagation(); toggleStatus(task); }}>
+                                  draggable={!(task as {_virtual?: boolean})._virtual}
+                                  onDragStart={(task as {_virtual?: boolean})._virtual ? undefined : e => { e.dataTransfer.setData('text/plain', String(task.id)); dragTaskId.current = task.id; }}
+                                  onDragEnd={(task as {_virtual?: boolean})._virtual ? undefined : () => { dragTaskId.current = null; setDragOverCell(null); }}
+                                  className={`sc-event ev-${task.type} urgency-${uk}${task.status === 'done' ? ' ev-done' : ''}${isTest(task) && task.status !== 'done' ? ' ev-test' : ''}${(task as {_virtual?: boolean})._virtual ? ' ev-readonly' : ''}`}
+                                  onClick={(task as {_virtual?: boolean})._virtual ? e => e.stopPropagation() : e => { e.stopPropagation(); toggleStatus(task); }}>
                                   <span className="ev-emoji">{typeEmoji(task.type)}</span>
                                   <span className={`ev-title${task.status === 'done' ? ' done' : ''}`}>{task.title}</span>
-                                  <button className="ev-edit" onClick={e => openEdit(task, e)}><Edit3 size={10} /></button>
+                                  {!(task as {_virtual?: boolean})._virtual && <button className="ev-edit" onClick={e => openEdit(task, e)}><Edit3 size={10} /></button>}
                                 </div>
                               );
                             })}
@@ -1112,6 +1146,51 @@ export default function KidDashboard() {
                 {editLoading ? 'שומר...' : 'שמור'}
               </button>
               <button className="btn-secondary" onClick={() => setEditTask(null)} style={{ flex: 1 }}>ביטול</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── QUICK ADD TASK (calendar cell click) ── */}
+      {addTaskCell && (
+        <div className="modal-overlay" onClick={() => setAddTaskCell(null)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()} style={{ maxWidth: 340 }}>
+            <button className="modal-close" onClick={() => setAddTaskCell(null)}><X size={20} /></button>
+            <div className="modal-header">
+              <div className="modal-icon" style={{ background: 'linear-gradient(135deg, #6BCB77, #74B9FF)' }}>
+                <Zap size={28} color="white" />
+              </div>
+              <h2 className="modal-title">הוסף משימה</h2>
+              <p className="modal-sub">
+                {HEBREW_DAYS[addTaskCell.day.getDay()]}, {addTaskCell.day.getDate()} {HEBREW_MONTHS[addTaskCell.day.getMonth()]} — {String(addTaskCell.hour).padStart(2, '0')}:00
+              </p>
+            </div>
+            <div className="form-field">
+              <label>כותרת</label>
+              <input
+                type="text"
+                className="form-select"
+                placeholder="מה צריך לעשות?"
+                value={addTaskTitle}
+                autoFocus
+                onChange={e => setAddTaskTitle(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') submitAddTask(); }}
+              />
+            </div>
+            <div className="form-field" style={{ marginTop: 12 }}>
+              <label>סוג</label>
+              <select className="form-select" value={addTaskType} onChange={e => setAddTaskType(e.target.value as Task['type'])}>
+                <option value="homework">שיעורי בית 📚</option>
+                <option value="test">מבחן 📝</option>
+                <option value="activity">פעילות 🎨</option>
+                <option value="other">אחר ✏️</option>
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
+              <button className="btn-primary" onClick={submitAddTask} disabled={addTaskLoading || !addTaskTitle.trim()} style={{ flex: 1 }}>
+                {addTaskLoading ? 'שומר...' : '+ הוסף'}
+              </button>
+              <button className="btn-secondary" onClick={() => setAddTaskCell(null)} style={{ flex: 1 }}>ביטול</button>
             </div>
           </div>
         </div>

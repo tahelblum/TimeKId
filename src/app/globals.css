@@ -1092,7 +1092,9 @@ body {
   gap: 3px;
   min-width: 0;
   transition: background 0.12s;
+  cursor: pointer;
 }
+.sc-cell:hover { background: rgba(108, 99, 255, 0.04); }
 .sc-today-col  { background: rgba(108, 99, 255, 0.025); }
 .sc-drag-over  { background: rgba(108, 99, 255, 0.12) !important; outline: 2px dashed var(--color-primary); outline-offset: -2px; }
 .sc-allday-tasks { flex: 1; display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 8px; }
@@ -1108,6 +1110,8 @@ body {
 }
 .sc-event:active { transform: scale(0.97); }
 .sc-event.ev-done    { opacity: 0.38; background: #F5F5F5; border-right-color: #aaa; }
+.sc-event.ev-readonly { cursor: default; opacity: 0.82; }
+.sc-event.ev-readonly:hover { transform: none; box-shadow: none; }
 .sc-event.ev-school   { background: #EBF8FD; border-right-color: #0984E3; }
 .sc-event.ev-test     { background: #FFF0EB; border-right-color: #E17055; }
 .sc-event.ev-holiday  { background: #FFF8E1; border-right-color: #F9A825; font-weight: 600; }
