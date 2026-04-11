@@ -358,9 +358,23 @@ export default function KidDashboard() {
 
   // ─── Data fetching — fetch once per session, filter client-side per week ────
   function applyWeekView(cached: KidDataCache, days: Date[]) {
+    // Build set of holiday date strings so we can suppress school slots on those days
+    const holidayDates = new Set<string>();
+    cached.holidays.forEach(h => {
+      if (!h.start_date) return;
+      const start = new Date(h.start_date + 'T00:00:00');
+      const end = h.end_date ? new Date(h.end_date + 'T00:00:00') : start;
+      days.forEach(d => { if (d >= start && d <= end) holidayDates.add(dayStrOf(d)); });
+    });
+
     const examTasks: Task[] = cached.exams.flatMap(e => { const t = examToTask(e, days); return t ? [t] : []; });
     setScheduleSlots(cached.slots);
-    const slotTasks: Task[] = cached.slots.flatMap(s => { const t = slotToTask(s, days); return t ? [t] : []; });
+    const slotTasks: Task[] = cached.slots.flatMap(s => {
+      const t = slotToTask(s, days);
+      // Drop slot if it falls on a holiday
+      if (t && holidayDates.has(dateStrFromTs(t.due_date))) return [];
+      return t ? [t] : [];
+    });
     const holidayTasks: Task[] = cached.holidays.flatMap(h => holidayToTasks(h, days));
     setWeekAllTasks([...cached.tasks, ...examTasks, ...slotTasks, ...holidayTasks]);
     // Keep the full real-task list stable across week navigation
