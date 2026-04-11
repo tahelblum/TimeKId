@@ -312,7 +312,8 @@ export default function KidDashboard() {
 
   // Study scheduler
   const [schedulerTest, setSchedulerTest] = useState<Task | null>(null);
-  const [studySessions, setStudySessions] = useState(['']);
+  const [studySessions, setStudySessions] = useState<string[]>([]);
+  const [studyMaterial, setStudyMaterial] = useState('');
   const [schedulerLoading, setSchedulerLoading] = useState(false);
 
   // Chat
@@ -709,20 +710,63 @@ export default function KidDashboard() {
     fetchWeekData(true);
   }
 
+  // Returns pre-filled datetime-local strings spread before the test
+  function suggestStudySessions(test: Task): string[] {
+    const d = daysUntil(test.due_date);
+    // offsets (days before test) → study hour
+    const plan: number[] =
+      d >= 7 ? [-6, -4, -2, -1] :
+      d >= 4 ? [-3, -2, -1] :
+      d >= 2 ? [-2, -1] :
+      d >= 1 ? [-1] : [0];
+    return plan.map(offset => {
+      const dt = new Date(test.due_date * 1000);
+      dt.setDate(dt.getDate() + offset);
+      dt.setHours(17, 0, 0, 0);
+      // Don't suggest dates in the past
+      if (dt < new Date()) dt.setTime(Date.now() + 3600 * 1000);
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:00`;
+    });
+  }
+
+  function openStudyPlanner(test: Task) {
+    setSchedulerTest(test);
+    setStudySessions(suggestStudySessions(test));
+    setStudyMaterial('');
+  }
+
   async function scheduleStudy() {
     if (!schedulerTest) return;
     setSchedulerLoading(true);
-    for (const s of studySessions.filter(s => s.trim())) {
+    const valid = studySessions.filter(s => s.trim());
+    for (const s of valid) {
+      const due_date = Math.floor(new Date(s).getTime() / 1000);
+      const title = `📖 לימוד: ${schedulerTest.title}`;
+      const description = studyMaterial.trim() ? `חומר: ${studyMaterial.trim()}` : `הכנה למבחן: ${schedulerTest.title}`;
+      const tmpId = -(Date.now() + Math.random() * 1000);
+      const newTask: Task = { id: tmpId, title, description, due_date, status: 'pending', type: 'homework' };
+      setWeekAllTasks(prev => [...prev, newTask]);
+      setAllRealTasksState(prev => sortByUrgency([...prev, newTask]));
       try {
-        await fetch(`${API_URL}${API_ENDPOINTS.TASKS.BOT}`, {
+        const res = await fetch(`${API_URL}${API_ENDPOINTS.CHILD.CREATE_TASK}`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: `לימוד לפני מבחן: ${schedulerTest.title} בתאריך ${s}` }),
+          body: JSON.stringify({ title, type: 'homework', due_date, description }),
         });
+        if (res.ok) {
+          const created = await res.json() as Task & { due_date: number };
+          const normalized = { ...created, due_date: created.due_date > 1e10 ? Math.floor(created.due_date / 1000) : created.due_date };
+          setWeekAllTasks(prev => prev.map(t => t.id === tmpId ? normalized : t));
+          setAllRealTasksState(prev => sortByUrgency(prev.map(t => t.id === tmpId ? normalized : t)));
+          if (kidDataCache) kidDataCache.tasks = [...kidDataCache.tasks.filter(t => t.id !== tmpId), normalized];
+        }
       } catch {}
     }
-    setSchedulerTest(null); setStudySessions(['']); setSchedulerLoading(false);
-    fetchWeekData(true);
+    setSchedulerTest(null);
+    setStudySessions([]);
+    setStudyMaterial('');
+    setSchedulerLoading(false);
   }
 
   async function submitAddTask() {
@@ -769,7 +813,12 @@ export default function KidDashboard() {
 
   const doneCnt = visibleTasks.filter(t => t.status === 'done').length;
   const pendingTasks = visibleTasks.filter(t => t.status !== 'done');
-  const upcomingTests = weekAllTasks.filter(t => isTest(t) && t.status !== 'done' && daysUntil(t.due_date) >= 0);
+  const upcomingTests = allRealTasksState.filter(t => isTest(t) && t.status !== 'done' && daysUntil(t.due_date) >= 0 && daysUntil(t.due_date) <= 14);
+  // Tests within 7 days that have no study tasks yet
+  const testsNeedingPlan = upcomingTests.filter(t =>
+    daysUntil(t.due_date) <= 7 &&
+    !allRealTasksState.some(r => r.title.startsWith('📖 לימוד:') && r.title.includes(t.title))
+  );
   const heroTask = allPending[0] || null;
 
   const dateLabel = view === 'day'
@@ -825,15 +874,17 @@ export default function KidDashboard() {
           <div className="test-banners">
             {upcomingTests.map(test => {
               const d = daysUntil(test.due_date);
+              const needsPlan = testsNeedingPlan.some(t => t.id === test.id);
               return (
-                <div key={test.id} className={`test-banner${d <= 1 ? ' urgent' : ''}`}>
+                <div key={test.id} className={`test-banner${d <= 1 ? ' urgent' : ''}${needsPlan ? ' needs-plan' : ''}`}>
                   <span className="test-banner-icon">📝</span>
                   <div className="test-banner-text">
                     <strong>{test.title}</strong>
                     <span>{d === 0 ? 'היום!' : d === 1 ? 'מחר!' : `בעוד ${d} ימים`}</span>
+                    {needsPlan && <span className="needs-plan-label">⚠️ טרם תוכנן זמן לימוד!</span>}
                   </div>
-                  <button className="test-banner-btn" onClick={() => { setSchedulerTest(test); setStudySessions(['']); }}>
-                    תכנן לימוד
+                  <button className="test-banner-btn" onClick={() => openStudyPlanner(test)}>
+                    {needsPlan ? '📅 תכנן עכשיו!' : 'תכנן לימוד'}
                   </button>
                 </div>
               );
@@ -1282,35 +1333,62 @@ export default function KidDashboard() {
 
       {/* ── STUDY SCHEDULER ── */}
       {schedulerTest && (
-        <div className="modal-overlay" onClick={() => setSchedulerTest(null)}>
+        <div className="modal-overlay" onClick={() => { setSchedulerTest(null); setStudySessions([]); setStudyMaterial(''); }}>
           <div className="modal-card" onClick={e => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setSchedulerTest(null)}><X size={20} /></button>
+            <button className="modal-close" onClick={() => { setSchedulerTest(null); setStudySessions([]); setStudyMaterial(''); }}><X size={20} /></button>
             <div className="modal-header">
               <div className="modal-icon" style={{ background: 'linear-gradient(135deg, #FFD93D, #FF6B6B)' }}>
                 <BookOpen size={28} color="white" />
               </div>
-              <h2 className="modal-title">תכנון זמן לימוד</h2>
-              <p className="modal-sub">מבחן: <strong>{schedulerTest.title}</strong></p>
+              <h2 className="modal-title">תכנון לימוד למבחן</h2>
+              <p className="modal-sub">📝 <strong>{schedulerTest.title}</strong></p>
+              <p className="modal-sub" style={{ color: '#FF6B6B', fontWeight: 800 }}>
+                {daysUntil(schedulerTest.due_date) === 0 ? 'המבחן היום!' :
+                 daysUntil(schedulerTest.due_date) === 1 ? 'המבחן מחר!' :
+                 `${daysUntil(schedulerTest.due_date)} ימים עד המבחן`}
+              </p>
             </div>
-            <p style={{ color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: 16, fontSize: '0.95rem' }}>
-              מתי תשב ללמוד? בחר תאריך ושעה:
-            </p>
+
+            {/* Learning material */}
+            <div className="form-field" style={{ marginBottom: 16 }}>
+              <label>📚 מה צריך ללמוד? (חומר הלימוד)</label>
+              <textarea
+                className="form-textarea"
+                placeholder="לדוגמה: פרקים 3-5, נוסחאות מהיחידה..."
+                value={studyMaterial}
+                onChange={e => setStudyMaterial(e.target.value)}
+                rows={2}
+              />
+            </div>
+
+            {/* Recommended sessions */}
+            <div className="study-sessions-label">
+              ⏰ מפגשי לימוד מומלצים — ניתן לשנות את השעות:
+            </div>
             {studySessions.map((s, i) => (
-              <div key={i} className="form-field" style={{ marginBottom: 12 }}>
-                <label>מפגש {i + 1}</label>
-                <input type="datetime-local" className="form-select" value={s}
+              <div key={i} className="study-session-row">
+                <span className="study-session-num">{i + 1}</span>
+                <input type="datetime-local" className="form-select study-session-input" value={s}
                   onChange={e => setStudySessions(p => p.map((x, j) => j === i ? e.target.value : x))} />
+                <button className="study-session-del" onClick={() => setStudySessions(p => p.filter((_, j) => j !== i))}>✕</button>
               </div>
             ))}
-            {studySessions.length < 3 && (
-              <button className="btn-secondary" style={{ marginBottom: 16 }} onClick={() => setStudySessions(p => [...p, ''])}>
-                + הוסף מפגש נוסף
-              </button>
-            )}
-            <button className="btn-primary" onClick={scheduleStudy}
+            <button className="btn-secondary" style={{ marginBottom: 18, width: '100%' }}
+              onClick={() => {
+                const last = studySessions[studySessions.length - 1];
+                const base = last ? new Date(last) : new Date();
+                base.setDate(base.getDate() - 1);
+                base.setHours(17, 0, 0, 0);
+                const pad = (n: number) => String(n).padStart(2, '0');
+                setStudySessions(p => [...p, `${base.getFullYear()}-${pad(base.getMonth()+1)}-${pad(base.getDate())}T17:00`]);
+              }}>
+              + הוסף מפגש לימוד
+            </button>
+
+            <button className="btn-primary" style={{ width: '100%' }} onClick={scheduleStudy}
               disabled={schedulerLoading || !studySessions.some(s => s.trim())}>
               <Zap size={18} style={{ marginLeft: 8 }} />
-              {schedulerLoading ? 'יוצר...' : 'צור משימות לימוד'}
+              {schedulerLoading ? 'יוצר משימות...' : `✅ צור ${studySessions.filter(s=>s.trim()).length} משימות לימוד`}
             </button>
           </div>
         </div>

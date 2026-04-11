@@ -569,6 +569,25 @@ body {
   cursor: pointer; transition: all 0.2s; box-shadow: 0 3px 10px rgba(255,159,67,.4);
 }
 .test-banner-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(255,159,67,.5); }
+.test-banner.needs-plan { border-color: #FF6B6B; animation: pulse 2s ease-in-out infinite; }
+.test-banner.needs-plan .test-banner-btn { background: linear-gradient(135deg, #FF6B6B, #FF9F43); }
+.needs-plan-label { display: block; font-size: 0.78rem; color: #FF6B6B; font-weight: 800; margin-top: 2px; }
+
+/* Study planner modal */
+.study-sessions-label { font-size: 0.88rem; font-weight: 700; color: var(--color-text-muted); margin-bottom: 10px; }
+.study-session-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.study-session-num {
+  width: 26px; height: 26px; border-radius: 50%; background: var(--color-primary);
+  color: white; font-weight: 800; font-size: 0.8rem;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.study-session-input { flex: 1; }
+.study-session-del {
+  background: none; border: 1.5px solid #DDD; border-radius: 8px;
+  width: 28px; height: 28px; cursor: pointer; color: #AAA; font-size: 0.75rem;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.study-session-del:hover { border-color: #FF6B6B; color: #FF6B6B; }
 
 /* ── Hero "Next Task" Card ────────────────────────────────── */
 .kid-hero {
