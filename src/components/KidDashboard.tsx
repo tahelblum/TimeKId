@@ -562,7 +562,7 @@ export default function KidDashboard() {
     setShowSchoolModal(true);
   }
 
-  async function readFileAsPayload(file: File): Promise<{ text?: string; image_base64?: string; image_type?: string }> {
+  async function readFileAsPayload(file: File): Promise<{ text?: string; image_base64?: string; image_type?: string; error?: string }> {
     if (file.type.startsWith('image/')) {
       const base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -571,6 +571,10 @@ export default function KidDashboard() {
         reader.readAsDataURL(file);
       });
       return { image_base64: base64, image_type: file.type };
+    }
+    // PDF and binary Office formats cannot be read as text — block them
+    if (file.type === 'application/pdf' || file.type.includes('officedocument') || file.type.includes('msword')) {
+      return { error: 'קובצי PDF ו-Word אינם נתמכים. העלה תמונה (צילום מסך) של מערכת השעות, או הדבק את הטקסט ידנית.' };
     }
     const text = (await file.text()).substring(0, 8000);
     return { text };
@@ -581,6 +585,7 @@ export default function KidDashboard() {
     setSchoolParseError('');
     try {
       const payload = await readFileAsPayload(file);
+      if (payload.error) { setSchoolParseError(payload.error); setSchoolLoading(false); return; }
       const res = await fetch('/api/schedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -614,6 +619,7 @@ export default function KidDashboard() {
     setExamsResult('');
     try {
       const payload = await readFileAsPayload(file);
+      if (payload.error) { setExamsResult(payload.error); setExamsLoading(false); return; }
       const res = await fetch('/api/exams-parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1508,7 +1514,7 @@ export default function KidDashboard() {
             </div>
             <div style={{ marginBottom: 16 }}>
               <p style={{ fontSize: 13, color: '#6C63FF', fontWeight: 600, marginBottom: 6 }}>העלה קובץ או תמונה:</p>
-              <input ref={schoolFileRef} type="file" accept=".txt,.pdf,.doc,.docx,.png,.jpg,.jpeg" style={{ display: 'none' }}
+              <input ref={schoolFileRef} type="file" accept=".txt,.png,.jpg,.jpeg,.webp,.heic" style={{ display: 'none' }}
                 onChange={e => { const f = e.target.files?.[0]; if (f) { parseSchoolFile(f); if (schoolFileRef.current) schoolFileRef.current.value = ''; } }} />
               <button className="btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
                 onClick={() => schoolFileRef.current?.click()} disabled={schoolLoading}>
@@ -1585,7 +1591,7 @@ export default function KidDashboard() {
               <div className={examsResult.startsWith('✅') ? 'success-box' : 'error-box'}>{examsResult}</div>
             ) : (
               <>
-                <input ref={examsFileRef} type="file" accept=".txt,.pdf,.doc,.docx,.png,.jpg,.jpeg" style={{ display: 'none' }}
+                <input ref={examsFileRef} type="file" accept=".txt,.png,.jpg,.jpeg,.webp,.heic" style={{ display: 'none' }}
                   onChange={e => { const f = e.target.files?.[0]; if (f) { parseExamsFile(f); if (examsFileRef.current) examsFileRef.current.value = ''; } }} />
                 <button className="btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12 }}
                   onClick={() => examsFileRef.current?.click()} disabled={examsLoading}>

@@ -73,10 +73,15 @@ export async function DELETE(req: NextRequest) {
 
 const SCHEDULE_SYSTEM = `You are a helper that parses Israeli school timetables (Hebrew or English).
 Extract schedule slots and return ONLY a JSON array. Each slot:
-{ "day_of_week": "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday", "Subject": "<exact subject name in Hebrew as written>", "start_time": "HH:MM", "endtime": "HH:MM" }
+{ "day_of_week": "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday", "Subject": "<exact subject name as written>", "start_time": "HH:MM", "endtime": "HH:MM" }
 Hebrew days: ראשון=Sunday, שני=Monday, שלישי=Tuesday, רביעי=Wednesday, חמישי=Thursday, שישי=Friday
-If end time not given, add 45 minutes.
-IMPORTANT: Extract ONLY subjects that are explicitly written. Do NOT invent or guess any subjects. Skip empty cells. Return ONLY the JSON array, no explanation.`;
+If end time not given, add 45 minutes. If no time at all, use 08:00 for the first slot and add 45 min per subsequent slot.
+Rules:
+- Extract subjects as written — do NOT translate, do NOT invent
+- Skip empty or unclear cells
+- If the input looks like a list of subjects per day (even without times), still extract them
+- Return ONLY the JSON array, no markdown, no explanation
+- If you cannot find any schedule data at all, return []`;
 
 // POST /api/schedule — parse schedule text/image + replace all slots
 // Body: { text?, image_base64?, image_type?, childId, authToken }
@@ -137,7 +142,11 @@ export async function POST(req: NextRequest) {
   }
 
   if (slots.length === 0) {
-    return NextResponse.json({ error: 'לא נמצאו שיעורים בקובץ. ודא שמדובר במערכת שעות שבועית.' }, { status: 422 });
+    const hint = raw.length < 10
+      ? 'הקובץ שהועלה לא נקרא כראוי. נסה להעלות תמונה (צילום מסך) של מערכת השעות.'
+      : 'לא זוהו שיעורים. ודא שהתוכן הוא מערכת שעות שבועית עם ימים ומקצועות.';
+    console.error('[/api/schedule POST] no slots. raw was:', raw.substring(0, 300));
+    return NextResponse.json({ error: hint }, { status: 422 });
   }
 
   // Delete existing slots
