@@ -94,8 +94,10 @@ function examToTask(exam: Exam, days: Date[]): Task | null {
   if (!exam.exam_date) return null;
   const hour = exam.exam_time ? parseTimeHour(exam.exam_time) : 12;
   const due_date = tsFromDateAndHour(exam.exam_date, hour);
+  const now = Math.floor(Date.now() / 1000);
+  const status = due_date < now ? 'done' : 'pending';
   return { id: -(exam.id * 1000 + 500), title: exam.notes || 'מבחן', description: exam.notes || '',
-    due_date, status: 'pending', type: 'test', _virtual: true, _examId: exam.id };
+    due_date, status, type: 'test', _virtual: true, _examId: exam.id };
 }
 function slotToTask(slot: ScheduleSlot, days: Date[]): Task | null {
   const dayOfWeek = slot.day_of_week || slot.dayofweek || slot.day || '';
@@ -422,11 +424,12 @@ export default function KidDashboard() {
       setStreak(newStreak);
     }
     try {
-      await fetch(`${API_URL}${API_ENDPOINTS.CHILD.UPDATE_TASK(task.id)}`, {
+      const res = await fetch(`${API_URL}${API_ENDPOINTS.CHILD.UPDATE_TASK(task.id)}`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: next }),
       });
+      if (res.status === 401) { logout(); router.push('/child-app'); }
     } catch {}
   }
 
