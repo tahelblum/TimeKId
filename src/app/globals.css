@@ -588,6 +588,50 @@ body {
   display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 .study-session-del:hover { border-color: #FF6B6B; color: #FF6B6B; }
+.btn-practice {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 20px; border-radius: 14px;
+  border: 2.5px solid #6C63FF; background: white;
+  color: #6C63FF; font-family: var(--font-body); font-weight: 800; font-size: 0.95rem;
+  cursor: pointer; transition: all 0.2s;
+}
+.btn-practice:hover:not(:disabled) { background: #6C63FF; color: white; }
+.btn-practice:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Practice exam modal ──────────────────────────────────── */
+.practice-q {
+  background: #FAFAFA; border-radius: 12px; padding: 14px 16px;
+  margin-bottom: 14px; border: 2px solid var(--color-border);
+  transition: border-color 0.2s;
+}
+.practice-q.q-correct { border-color: #6BCB77; background: #F4FFF6; }
+.practice-q.q-wrong   { border-color: #FF6B6B; background: #FFF5F5; }
+.practice-q-num { font-size: 0.75rem; font-weight: 800; color: var(--color-text-muted); text-transform: uppercase; margin-bottom: 6px; }
+.practice-q-text { font-weight: 700; font-size: 1rem; color: var(--color-text); margin-bottom: 10px; line-height: 1.5; }
+.practice-options { display: flex; flex-direction: column; gap: 8px; }
+.practice-option {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border-radius: 10px; border: 2px solid var(--color-border);
+  background: white; cursor: pointer; font-weight: 600; font-size: 0.9rem;
+  transition: all 0.15s;
+}
+.practice-option input { display: none; }
+.practice-option.selected { border-color: #6C63FF; background: #F0EEFF; }
+.practice-option.correct-opt { border-color: #6BCB77; background: #EDFFF0; font-weight: 800; }
+.practice-option.wrong-opt  { border-color: #FF6B6B; background: #FFF0F0; }
+.practice-input { margin-top: 4px; width: 100%; }
+.practice-answer {
+  margin-top: 10px; padding: 8px 12px; border-radius: 8px;
+  font-weight: 700; font-size: 0.88rem;
+}
+.ans-correct { background: #EDFFF0; color: #2D7D46; }
+.ans-wrong   { background: #FFF0F0; color: #CC3333; }
+.ans-reveal  { background: #F0EEFF; color: #6C63FF; }
+.practice-score {
+  font-family: var(--font-display); font-size: 1.4rem; color: var(--color-text);
+  padding: 12px; background: linear-gradient(135deg, #F0EEFF, #E8F4FF);
+  border-radius: 12px; display: inline-block;
+}
 
 /* ── Hero "Next Task" Card ────────────────────────────────── */
 .kid-hero {

@@ -316,6 +316,14 @@ export default function KidDashboard() {
   const [studyMaterial, setStudyMaterial] = useState('');
   const [schedulerLoading, setSchedulerLoading] = useState(false);
 
+  // Practice exam
+  type PracticeQuestion = { type: 'multiple_choice' | 'short_answer' | 'fill_blank'; question: string; options?: string[]; answer: string };
+  const [practiceExam, setPracticeExam] = useState<{ subject: string; questions: PracticeQuestion[] } | null>(null);
+  const [practiceLoading, setPracticeLoading] = useState(false);
+  const [practiceError, setPracticeError] = useState('');
+  const [userAnswers, setUserAnswers] = useState<Record<number, string>>({});
+  const [showAnswers, setShowAnswers] = useState(false);
+
   // Chat
   const [showChat, setShowChat] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -767,6 +775,24 @@ export default function KidDashboard() {
     setStudySessions([]);
     setStudyMaterial('');
     setSchedulerLoading(false);
+  }
+
+  async function fetchPracticeExam(subject: string, material: string) {
+    setPracticeLoading(true);
+    setPracticeError('');
+    try {
+      const res = await fetch('/api/practice-exam', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject, material, grade: child?.grade || '5' }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setPracticeError(data.error || 'שגיאה'); return; }
+      setPracticeExam({ subject, questions: data.questions });
+      setUserAnswers({});
+      setShowAnswers(false);
+    } catch { setPracticeError('שגיאת רשת'); }
+    finally { setPracticeLoading(false); }
   }
 
   async function submitAddTask() {
@@ -1385,11 +1411,85 @@ export default function KidDashboard() {
               + הוסף מפגש לימוד
             </button>
 
-            <button className="btn-primary" style={{ width: '100%' }} onClick={scheduleStudy}
+            <button className="btn-primary" style={{ width: '100%', marginBottom: 10 }} onClick={scheduleStudy}
               disabled={schedulerLoading || !studySessions.some(s => s.trim())}>
               <Zap size={18} style={{ marginLeft: 8 }} />
               {schedulerLoading ? 'יוצר משימות...' : `✅ צור ${studySessions.filter(s=>s.trim()).length} משימות לימוד`}
             </button>
+            <button className="btn-practice" style={{ width: '100%' }}
+              disabled={practiceLoading || (!studyMaterial.trim() && !schedulerTest?.title)}
+              onClick={() => fetchPracticeExam(schedulerTest?.title || '', studyMaterial)}>
+              {practiceLoading ? '⏳ יוצר מבחן תרגול...' : '🧠 קבל מבחן תרגול מה-AI'}
+            </button>
+            {practiceError && <p style={{ color: '#FF6B6B', fontSize: '0.85rem', marginTop: 8, textAlign: 'center' }}>{practiceError}</p>}
+          </div>
+        </div>
+      )}
+
+      {/* ── PRACTICE EXAM ── */}
+      {practiceExam && (
+        <div className="modal-overlay" onClick={() => setPracticeExam(null)}>
+          <div className="modal-card modal-wide" onClick={e => e.stopPropagation()} style={{ maxHeight: '90vh', overflowY: 'auto' }}>
+            <button className="modal-close" onClick={() => setPracticeExam(null)}><X size={20} /></button>
+            <div className="modal-header">
+              <div className="modal-icon" style={{ background: 'linear-gradient(135deg, #6C63FF, #A29BFE)' }}>
+                <BookOpen size={28} color="white" />
+              </div>
+              <h2 className="modal-title">מבחן תרגול 🧠</h2>
+              <p className="modal-sub">{practiceExam.subject} — כיתה {child?.grade}</p>
+            </div>
+
+            {practiceExam.questions.map((q, i) => {
+              const answered = userAnswers[i] !== undefined;
+              const correct = showAnswers && userAnswers[i]?.trim() === q.answer?.trim();
+              const wrong   = showAnswers && answered && !correct;
+              return (
+                <div key={i} className={`practice-q${showAnswers ? (correct ? ' q-correct' : answered ? ' q-wrong' : '') : ''}`}>
+                  <div className="practice-q-num">שאלה {i + 1}</div>
+                  <div className="practice-q-text">{q.question}</div>
+                  {q.type === 'multiple_choice' && q.options && (
+                    <div className="practice-options">
+                      {q.options.map((opt, oi) => (
+                        <label key={oi} className={`practice-option${userAnswers[i] === opt[0] ? ' selected' : ''}${showAnswers && q.answer === opt[0] ? ' correct-opt' : ''}${showAnswers && userAnswers[i] === opt[0] && q.answer !== opt[0] ? ' wrong-opt' : ''}`}>
+                          <input type="radio" name={`q${i}`} value={opt[0]} disabled={showAnswers}
+                            checked={userAnswers[i] === opt[0]}
+                            onChange={() => setUserAnswers(p => ({ ...p, [i]: opt[0] }))} />
+                          {opt}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {(q.type === 'short_answer' || q.type === 'fill_blank') && (
+                    <input type="text" className="form-select practice-input" disabled={showAnswers}
+                      placeholder={q.type === 'fill_blank' ? 'השלם את החסר...' : 'כתוב תשובה...'}
+                      value={userAnswers[i] ?? ''}
+                      onChange={e => setUserAnswers(p => ({ ...p, [i]: e.target.value }))} />
+                  )}
+                  {showAnswers && (
+                    <div className={`practice-answer ${correct ? 'ans-correct' : wrong ? 'ans-wrong' : 'ans-reveal'}`}>
+                      {correct ? '✅ נכון!' : wrong ? `❌ לא נכון — התשובה הנכונה: ${q.answer}` : `💡 תשובה: ${q.answer}`}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {!showAnswers ? (
+              <button className="btn-primary" style={{ width: '100%', marginTop: 8 }} onClick={() => setShowAnswers(true)}>
+                📊 בדוק תשובות
+              </button>
+            ) : (
+              <div style={{ textAlign: 'center', marginTop: 12 }}>
+                <div className="practice-score">
+                  ציון: {practiceExam.questions.filter((q, i) => userAnswers[i]?.trim() === q.answer?.trim()).length} / {practiceExam.questions.length}
+                  {' '}{'⭐'.repeat(Math.round(practiceExam.questions.filter((q, i) => userAnswers[i]?.trim() === q.answer?.trim()).length / practiceExam.questions.length * 5))}
+                </div>
+                <button className="btn-secondary" style={{ marginTop: 10 }}
+                  onClick={() => fetchPracticeExam(practiceExam.subject, studyMaterial)}>
+                  🔄 מבחן חדש
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
