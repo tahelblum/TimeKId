@@ -367,6 +367,8 @@ export default function KidDashboard() {
         fetch(`${API_URL}${API_ENDPOINTS.CHILD.SCHEDULE}`, { headers: auth }).catch(() => null),
         fetch(`${API_URL}${API_ENDPOINTS.CHILD.HOLIDAYS}`, { headers: auth }).catch(() => null),
       ]);
+      // Token expired — log out and redirect to login
+      if (tasksRes.status === 401) { logout(); router.push('/child-app'); return; }
       const tasks: Task[]         = tasksRes.ok   ? extractArray(await tasksRes.json())            : [];
       const exams: Exam[]         = examsRes?.ok   ? toAnyArray(await examsRes.json()) as Exam[]   : [];
       const slots: ScheduleSlot[] = slotsRes?.ok   ? toAnyArray(await slotsRes.json()) as ScheduleSlot[] : [];
