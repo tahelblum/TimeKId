@@ -365,6 +365,9 @@ export default function KidDashboard() {
   const calBodyRef = useRef<HTMLDivElement>(null);
   const ROW_HEIGHT = 56;
 
+  // In-flight guard — prevents concurrent Xano fetches
+  const fetchInFlight = useRef(false);
+
   // ─── Data fetching — fetch once per session, filter client-side per week ────
   function applyWeekView(cached: KidDataCache, days: Date[]) {
     // Build set of holiday date strings so we can suppress school slots on those days
@@ -390,39 +393,46 @@ export default function KidDashboard() {
     setAllRealTasksState(sortByUrgency(cached.tasks));
   }
 
+  // fetchWeekData: makes API calls at most once per KID_CACHE_TTL.
+  // Does NOT depend on currentDate — navigation is handled by the separate effect below.
   const fetchWeekData = useCallback(async (force = false) => {
-    const days = weekDays(currentDate);
+    if (fetchInFlight.current && !force) return; // block concurrent calls
     const now = Date.now();
-
     if (force) kidDataCache = null;
 
     if (kidDataCache && now - kidDataCache.fetchedAt < KID_CACHE_TTL) {
-      applyWeekView(kidDataCache, days);
+      // Cache still valid — just re-apply for the current week (no API calls)
+      applyWeekView(kidDataCache, weekDays(currentDate));
       return;
     }
 
+    fetchInFlight.current = true;
     setTasksLoading(true);
     const auth = { Authorization: `Bearer ${authToken}` };
     try {
-      // 4 calls once per 30 min — week navigation costs 0 extra calls
       const [tasksRes, examsRes, slotsRes, holidaysRes] = await Promise.all([
         fetch(`${API_URL}${API_ENDPOINTS.CHILD.MY_TASKS}`, { headers: auth }),
         fetch(`${API_URL}${API_ENDPOINTS.CHILD.EXAMS}`, { headers: auth }).catch(() => null),
         fetch(`${API_URL}${API_ENDPOINTS.CHILD.SCHEDULE}`, { headers: auth }).catch(() => null),
         fetch(`${API_URL}${API_ENDPOINTS.CHILD.HOLIDAYS}`, { headers: auth }).catch(() => null),
       ]);
-      // Token expired — log out and redirect to login
       if (tasksRes.status === 401) { logout(); router.push('/child-app'); return; }
-      const tasks: Task[]         = tasksRes.ok   ? extractArray(await tasksRes.json())            : [];
-      const exams: Exam[]         = examsRes?.ok   ? toAnyArray(await examsRes.json()) as Exam[]   : [];
+      const tasks: Task[]         = tasksRes.ok    ? extractArray(await tasksRes.json())             : [];
+      const exams: Exam[]         = examsRes?.ok   ? toAnyArray(await examsRes.json()) as Exam[]    : [];
       const slots: ScheduleSlot[] = slotsRes?.ok   ? toAnyArray(await slotsRes.json()) as ScheduleSlot[] : [];
       const holidays: Holiday[]   = holidaysRes?.ok ? toAnyArray(await holidaysRes.json()) as Holiday[] : [];
       kidDataCache = { tasks, exams, slots, holidays, fetchedAt: now };
-      applyWeekView(kidDataCache, days);
-    } catch {} finally { setTasksLoading(false); }
-  }, [currentDate, authToken]);
+      applyWeekView(kidDataCache, weekDays(currentDate));
+    } catch {} finally { setTasksLoading(false); fetchInFlight.current = false; }
+  }, [authToken]); // ← currentDate removed: navigation never triggers API calls
 
+  // Initial fetch on mount / auth change
   useEffect(() => { fetchWeekData(); }, [fetchWeekData]);
+
+  // Week navigation: re-apply cached data client-side, no API call
+  useEffect(() => {
+    if (kidDataCache) applyWeekView(kidDataCache, weekDays(currentDate));
+  }, [currentDate]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
   useEffect(() => {
     if (calBodyRef.current) {
