@@ -263,6 +263,8 @@ export default function KidDashboard() {
 
   // Single source of truth — all tasks for the currently viewed week
   const [weekAllTasks, setWeekAllTasks] = useState<Task[]>([]);
+  // All real (non-virtual) tasks ever fetched — persists across week navigation
+  const [allRealTasksState, setAllRealTasksState] = useState<Task[]>([]);
   // Schedule slots (recurring weekly) — stored separately for modal pre-population
   const [scheduleSlots, setScheduleSlots] = useState<ScheduleSlot[]>([]);
 
@@ -355,6 +357,8 @@ export default function KidDashboard() {
     const slotTasks: Task[] = cached.slots.flatMap(s => { const t = slotToTask(s, days); return t ? [t] : []; });
     const holidayTasks: Task[] = cached.holidays.flatMap(h => holidayToTasks(h, days));
     setWeekAllTasks([...cached.tasks, ...examTasks, ...slotTasks, ...holidayTasks]);
+    // Keep the full real-task list stable across week navigation
+    setAllRealTasksState(sortByUrgency(cached.tasks));
   }
 
   const fetchWeekData = useCallback(async (force = false) => {
@@ -425,6 +429,7 @@ export default function KidDashboard() {
     if (task._virtual) return;
     const next: Task['status'] = task.status === 'pending' ? 'in_progress' : task.status === 'in_progress' ? 'done' : 'pending';
     setWeekAllTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: next } : t));
+    setAllRealTasksState(prev => sortByUrgency(prev.map(t => t.id === task.id ? { ...t, status: next } : t)));
     if (next === 'done') {
       setCelebration(task);
       const newPoints = earnPoints(10);
@@ -709,6 +714,7 @@ export default function KidDashboard() {
     const tmpId = -(Date.now());
     const newTask: Task = { id: tmpId, title, description: '', due_date, status: 'pending', type };
     setWeekAllTasks(prev => [...prev, newTask]);
+    setAllRealTasksState(prev => sortByUrgency([...prev, newTask]));
     setAddTaskCell(null);
     setAddTaskTitle('');
     setAddTaskType('homework');
@@ -722,6 +728,7 @@ export default function KidDashboard() {
         const created = await res.json() as Task & { due_date: number };
         const normalized = { ...created, due_date: created.due_date > 1e10 ? Math.floor(created.due_date / 1000) : created.due_date };
         setWeekAllTasks(prev => prev.map(t => t.id === tmpId ? normalized : t));
+        setAllRealTasksState(prev => sortByUrgency(prev.map(t => t.id === tmpId ? normalized : t)));
         if (kidDataCache) kidDataCache.tasks = [...kidDataCache.tasks.filter(t => t.id !== tmpId), normalized];
       }
     } catch {} finally { setAddTaskLoading(false); }
@@ -736,10 +743,9 @@ export default function KidDashboard() {
     : weekAllTasks;
   const visibleTasks = sortByUrgency(rawVisible);
 
-  // All real (non-virtual) tasks — used for the task lists regardless of day/week view
-  const allRealTasks = sortByUrgency(weekAllTasks.filter(t => !(t as Task & { _virtual?: boolean })._virtual));
-  const allPending = allRealTasks.filter(t => t.status !== 'done');
-  const allDone = allRealTasks.filter(t => t.status === 'done');
+  // All real tasks (persists across week navigation) — used for task lists & progress
+  const allPending = allRealTasksState.filter(t => t.status !== 'done');
+  const allDone    = allRealTasksState.filter(t => t.status === 'done');
 
   const doneCnt = visibleTasks.filter(t => t.status === 'done').length;
   const pendingTasks = visibleTasks.filter(t => t.status !== 'done');
@@ -841,14 +847,14 @@ export default function KidDashboard() {
         )}
 
         {/* ── PROGRESS BAR ── */}
-        {allRealTasks.length > 0 && (
+        {allRealTasksState.length > 0 && (
           <div className="kid-progress-wrap">
             <div className="kid-progress-label">
-              <span>{allDone.length} / {allRealTasks.length} הושלמו</span>
-              <span>{Math.round((allDone.length / allRealTasks.length) * 100)}%</span>
+              <span>{allDone.length} / {allRealTasksState.length} הושלמו</span>
+              <span>{Math.round((allDone.length / allRealTasksState.length) * 100)}%</span>
             </div>
             <div className="kid-progress-bar">
-              <div className="kid-progress-fill" style={{ width: `${(allDone.length / allRealTasks.length) * 100}%` }} />
+              <div className="kid-progress-fill" style={{ width: `${(allDone.length / allRealTasksState.length) * 100}%` }} />
             </div>
           </div>
         )}
