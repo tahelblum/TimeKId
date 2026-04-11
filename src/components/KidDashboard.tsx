@@ -847,6 +847,33 @@ export default function KidDashboard() {
           </div>
         )}
 
+        {/* ── PENDING TASKS LIST ── */}
+        {pendingTasks.filter(t => !(t as Task & { _virtual?: boolean })._virtual).length > 0 && (
+          <div className="pending-tasks-list">
+            {pendingTasks.filter(t => !(t as Task & { _virtual?: boolean })._virtual).map(task => {
+              const uk = urgencyKey(task.due_date, task.status);
+              return (
+                <div key={task.id} className={`pending-task-row urgency-row-${uk}`}>
+                  <button className="pending-task-check" onClick={() => toggleStatus(task)} title="סמן כהושלם">
+                    {task.status === 'in_progress' ? <Clock size={22} color="#74B9FF" /> : <Circle size={22} color="#C4BEFF" />}
+                  </button>
+                  <span className="pending-task-emoji">{typeEmoji(task.type)}</span>
+                  <div className="pending-task-info">
+                    <span className="pending-task-title">{task.title}</span>
+                    <span className="pending-task-date">{relativeDate(task.due_date)}</span>
+                  </div>
+                  {task.status === 'in_progress' && (
+                    <button className="pending-task-done-btn" onClick={() => toggleStatus(task)}>✓ סיימתי</button>
+                  )}
+                  {task.status === 'pending' && (
+                    <button className="pending-task-start-btn" onClick={() => toggleStatus(task)}>▶ התחל</button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {/* ── COMPLETED TASKS LIST ── */}
         {doneCnt > 0 && (
           <div className="done-tasks-section">
