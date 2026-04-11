@@ -115,8 +115,8 @@ export async function POST(req: NextRequest) {
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1500,
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2000,
       system: SCHEDULE_SYSTEM,
       messages: [{ role: 'user', content: userContent }],
     }),
@@ -145,8 +145,8 @@ export async function POST(req: NextRequest) {
     const hint = raw.length < 10
       ? 'הקובץ שהועלה לא נקרא כראוי. נסה להעלות תמונה (צילום מסך) של מערכת השעות.'
       : 'לא זוהו שיעורים. ודא שהתוכן הוא מערכת שעות שבועית עם ימים ומקצועות.';
-    console.error('[/api/schedule POST] no slots. raw was:', raw.substring(0, 300));
-    return NextResponse.json({ error: hint }, { status: 422 });
+    console.error('[/api/schedule POST] no slots. raw was:', raw.substring(0, 500));
+    return NextResponse.json({ error: hint, debug_raw: raw.substring(0, 300) }, { status: 422 });
   }
 
   // Delete existing slots

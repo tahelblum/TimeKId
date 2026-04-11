@@ -573,6 +573,10 @@ export default function KidDashboard() {
   }
 
   async function readFileAsPayload(file: File): Promise<{ text?: string; image_base64?: string; image_type?: string; error?: string }> {
+    // HEIC is not supported by Claude Vision
+    if (file.type === 'image/heic' || file.type === 'image/heif' || file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif')) {
+      return { error: 'קבצי HEIC (צילומי iPhone) אינם נתמכים. שלח צילום מסך (PNG/JPG) במקום.' };
+    }
     if (file.type.startsWith('image/')) {
       const base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -603,7 +607,8 @@ export default function KidDashboard() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setSchoolParseError(data.error || 'שגיאה בניתוח הקובץ');
+        const debugInfo = data.debug_raw ? ` (AI: "${data.debug_raw.substring(0, 80)}...")` : '';
+        setSchoolParseError((data.error || 'שגיאה בניתוח הקובץ') + debugInfo);
       } else {
         const grid: Record<string, string> = {};
         const newSlots: ScheduleSlot[] = (data.slots ?? []) as ScheduleSlot[];
@@ -1524,7 +1529,7 @@ export default function KidDashboard() {
             </div>
             <div style={{ marginBottom: 16 }}>
               <p style={{ fontSize: 13, color: '#6C63FF', fontWeight: 600, marginBottom: 6 }}>העלה קובץ או תמונה:</p>
-              <input ref={schoolFileRef} type="file" accept=".txt,.png,.jpg,.jpeg,.webp,.heic" style={{ display: 'none' }}
+              <input ref={schoolFileRef} type="file" accept=".txt,.png,.jpg,.jpeg,.webp" style={{ display: 'none' }}
                 onChange={e => { const f = e.target.files?.[0]; if (f) { parseSchoolFile(f); if (schoolFileRef.current) schoolFileRef.current.value = ''; } }} />
               <button className="btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
                 onClick={() => schoolFileRef.current?.click()} disabled={schoolLoading}>
@@ -1601,7 +1606,7 @@ export default function KidDashboard() {
               <div className={examsResult.startsWith('✅') ? 'success-box' : 'error-box'}>{examsResult}</div>
             ) : (
               <>
-                <input ref={examsFileRef} type="file" accept=".txt,.png,.jpg,.jpeg,.webp,.heic" style={{ display: 'none' }}
+                <input ref={examsFileRef} type="file" accept=".txt,.png,.jpg,.jpeg,.webp" style={{ display: 'none' }}
                   onChange={e => { const f = e.target.files?.[0]; if (f) { parseExamsFile(f); if (examsFileRef.current) examsFileRef.current.value = ''; } }} />
                 <button className="btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12 }}
                   onClick={() => examsFileRef.current?.click()} disabled={examsLoading}>
