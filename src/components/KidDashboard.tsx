@@ -18,8 +18,8 @@ const normalizeTasks = (arr: Task[]): Task[] => arr.map(t => {
   if (!due && t.due_time) due = Math.floor(new Date(t.due_time + 'T12:00:00').getTime() / 1000);
   // Xano returns timestamps in milliseconds; convert to seconds for all calendar math
   if (due && due > 1e10) due = Math.floor(due / 1000);
-  // If still unreasonably far in the future (unit mismatch / AI hallucination), clear it
-  if (due && due - NOW_S() > MAX_FUTURE_S) due = 0;
+  // If still unreasonably far in the future (unit mismatch / AI hallucination), reset to today
+  if (due && due - NOW_S() > MAX_FUTURE_S) due = NOW_S();
   return { ...t, due_date: due || 0 };
 });
 const extractArray = (d: unknown): Task[] => {
