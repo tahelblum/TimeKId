@@ -113,35 +113,38 @@ export async function PUT(req: NextRequest) {
 
 const SCHEDULE_SYSTEM = `You are parsing an Israeli school weekly timetable (מערכת שעות שבועית).
 
-STRUCTURE: The timetable is a grid.
-- COLUMNS = days of the week. Column headers are Hebrew day names (ראשון, שני, שלישי, רביעי, חמישי, שישי) or English (Sunday–Friday). The table may be RTL so columns may appear right-to-left.
-- ROWS = lesson periods. Each row is labeled with a lesson number (שיעור 1, שיעור 2, etc.) or a time range (08:00-08:45).
-- Each CELL contains the subject name for that day at that lesson period.
+STEP 1 — IDENTIFY COLUMNS:
+Count the day columns and read their headers carefully. Each column is exactly ONE day.
+Hebrew day headers: ראשון=Sunday, שני=Monday, שלישי=Tuesday, רביעי=Wednesday, חמישי=Thursday, שישי=Friday
+The table may be RTL (right-to-left), meaning ראשון is on the RIGHT and שישי is on the LEFT.
+Do NOT assign the same day to two columns. Do NOT skip a column.
 
-HEBREW DAYS: ראשון=Sunday, שני=Monday, שלישי=Tuesday, רביעי=Wednesday, חמישי=Thursday, שישי=Friday
+STEP 2 — IDENTIFY ROWS:
+Each row is one lesson period, labeled by number (שיעור 1, שיעור 2…) or by time (08:00-08:45).
 
-LESSON TIMES — use these standard times when no explicit time is shown:
-Period 1: 08:00-08:45
-Period 2: 08:55-09:40
-Period 3: 09:50-10:35
-Period 4: 10:45-11:30
-Period 5: 11:40-12:25
-Period 6: 12:35-13:20
-Period 7: 13:30-14:15
-Period 8: 14:25-15:10
-Period 9: 15:20-16:05
-Period 10: 16:15-17:00
+STEP 3 — READ EACH CELL:
+For every (row, column) cell that has a subject name, output one JSON entry.
+
+LESSON TIMES — use these when no explicit time is shown:
+Period 1: 08:00-08:45  | Period 2: 08:55-09:40  | Period 3: 09:50-10:35
+Period 4: 10:45-11:30  | Period 5: 11:40-12:25  | Period 6: 12:35-13:20
+Period 7: 13:30-14:15  | Period 8: 14:25-15:10  | Period 9: 15:20-16:05
+
+⚠️ CRITICAL — EASILY CONFUSED HEBREW SUBJECTS:
+- עברית = Hebrew language (letters: ע-ב-ר-י-ת)
+- ערבית = Arabic language (letters: ע-ר-ב-י-ת)
+These look almost identical. Read the second and third letters carefully: ב then ר = עברית, ר then ב = ערבית.
 
 OUTPUT: Return ONLY a JSON array, no markdown, no explanation:
 [{"day_of_week":"Sunday","Subject":"מתמטיקה","start_time":"08:00","endtime":"08:45"}]
 
 RULES:
-- Read every column carefully — each column is ONE specific day
-- Read every row — each row is ONE lesson period
-- Copy subject names EXACTLY as written in Hebrew — do NOT translate or paraphrase
-- Skip empty cells and cells with dashes or dots
-- Each extracted cell = one JSON object in the array
-- If you cannot find schedule data, return []`;
+- Each column = exactly one unique day. Never duplicate a day.
+- Copy subject names EXACTLY as written — do NOT translate or paraphrase
+- Skip empty cells, dashes, and dots only
+- Include ALL non-empty cells, even if the subject repeats across days
+- Return [] only if no schedule data exists at all`;
+
 
 
 // POST /api/schedule — AI parsing ONLY, returns parsed slots without saving
