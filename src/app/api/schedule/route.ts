@@ -121,8 +121,9 @@ Do NOT assign the same day to two columns. Do NOT skip a column.
 ⚠️ If a column header says שישי (Friday) but ALL its cells are empty or dashes — skip that column entirely. Do NOT output any Friday entries unless there is actual subject content in the Friday column.
 
 STEP 2 — IDENTIFY ROWS:
+The FIRST row after the header is Period 1 (שיעור 1 / 08:00). It is a lesson row, NOT a header — include it.
 Each row is one lesson period, labeled by number (שיעור 1, שיעור 2…) or by time (08:00-08:45).
-Process ALL rows from top to bottom — do NOT stop early. Include every row that has content, even the last periods of the day.
+Process ALL rows from top to bottom — do NOT skip the first lesson row, do NOT stop early. Include every row that has content.
 
 STEP 3 — READ EACH CELL:
 For every (row, column) cell that has a subject name, output one JSON entry.
