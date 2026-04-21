@@ -87,8 +87,7 @@ export async function DELETE(req: NextRequest) {
   return NextResponse.json({ deleted });
 }
 
-// PUT /api/schedule — replace all slots with a pre-parsed array (no AI)
-// Used by the manual grid submit in KidDashboard
+// PUT /api/schedule — save pre-parsed slots to Xano (no AI, just Xano writes)
 export async function PUT(req: NextRequest) {
   const metaToken = process.env.XANO_META_TOKEN;
   if (!metaToken) return NextResponse.json({ error: 'server misconfigured' }, { status: 500 });
@@ -97,11 +96,11 @@ export async function PUT(req: NextRequest) {
     childId: number;
     slots: Array<{ day_of_week: string; Subject: string; start_time: string; endtime: string }>;
   };
-  if (!childId || !slots) return NextResponse.json({ error: 'missing fields' }, { status: 400 });
+  if (!childId || !Array.isArray(slots)) return NextResponse.json({ error: 'missing fields' }, { status: 400 });
 
   const deleted = await deleteChildSlotsMeta(metaToken, childId);
   const created = await createSlotsMeta(metaToken, childId, slots);
-  console.log(`[/api/schedule PUT] replaced: deleted ${deleted}, created ${created.length}`);
+  console.log(`[/api/schedule PUT] deleted=${deleted} created=${created.length}`);
   return NextResponse.json({ deleted, created: created.length, slots: created });
 }
 
@@ -117,18 +116,16 @@ Rules:
 - Return ONLY the JSON array, no markdown, no explanation
 - If you cannot find any schedule data at all, return []`;
 
-// POST /api/schedule — parse schedule text/image with AI + replace all slots
+// POST /api/schedule — AI parsing ONLY, returns parsed slots without saving
+// Client must follow up with PUT /api/schedule to persist
 export async function POST(req: NextRequest) {
-  const metaToken = process.env.XANO_META_TOKEN;
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  if (!metaToken || !anthropicKey) {
-    return NextResponse.json({ error: 'server misconfigured' }, { status: 500 });
-  }
+  if (!anthropicKey) return NextResponse.json({ error: 'server misconfigured' }, { status: 500 });
 
-  const { text, image_base64, image_type, childId } = await req.json() as {
-    text?: string; image_base64?: string; image_type?: string; childId: number; authToken?: string;
+  const { text, image_base64, image_type } = await req.json() as {
+    text?: string; image_base64?: string; image_type?: string;
   };
-  if ((!text && !image_base64) || !childId) {
+  if (!text && !image_base64) {
     return NextResponse.json({ error: 'missing fields' }, { status: 400 });
   }
 
@@ -148,7 +145,7 @@ export async function POST(req: NextRequest) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
+      max_tokens: 4000,
       system: SCHEDULE_SYSTEM,
       messages: [{ role: 'user', content: userContent }],
     }),
@@ -161,7 +158,7 @@ export async function POST(req: NextRequest) {
 
   const aiData = await aiRes.json();
   const raw = (aiData?.content?.[0]?.text ?? '').trim();
-  console.log('[/api/schedule POST] AI raw:', raw.substring(0, 400));
+  console.log('[/api/schedule POST] AI raw (first 600):', raw.substring(0, 600));
 
   let slots: Array<{ day_of_week: string; Subject: string; start_time: string; endtime: string }> = [];
   try {
@@ -179,9 +176,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: hint, debug_raw: raw.substring(0, 300) }, { status: 422 });
   }
 
-  // All Xano writes go through Meta API — no user API quota consumed
-  const deleted = await deleteChildSlotsMeta(metaToken, childId);
-  const created = await createSlotsMeta(metaToken, childId, slots);
-  console.log(`[/api/schedule POST] replaced: deleted ${deleted}, created ${created.length}`);
-  return NextResponse.json({ deleted, created: created.length, slots: created });
+  console.log(`[/api/schedule POST] parsed ${slots.length} slots`);
+  // Return parsed slots only — client calls PUT to save
+  return NextResponse.json({ slots });
 }

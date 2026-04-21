@@ -594,37 +594,50 @@ export default function KidDashboard() {
     return { text };
   }
 
+  async function saveScheduleSlots(parsedSlots: ScheduleSlot[]) {
+    const saveRes = await fetch('/api/schedule', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ childId: child?.id, slots: parsedSlots }),
+    });
+    const saveData = await saveRes.json();
+    const saved: ScheduleSlot[] = (saveData.slots ?? []) as ScheduleSlot[];
+    const grid: Record<string, string> = {};
+    saved.forEach(slot => {
+      const dayNum = DAY_OF_WEEK_NUM[slot.day_of_week || ''];
+      if (dayNum !== undefined && dayNum <= 4) {
+        const hour = parseTimeHour(slot.start_time || '');
+        if (SCHOOL_PERIODS.includes(hour)) grid[`${dayNum}-${hour}`] = slot.Subject || '';
+      }
+    });
+    setScheduleSlots(saved);
+    setSchoolGrid(grid);
+    setShowSchoolModal(false);
+    if (kidDataCache) { kidDataCache.slots = saved; applyWeekView(kidDataCache, weekDays(currentDate)); }
+    else fetchWeekData(true);
+    return saved.length;
+  }
+
   async function parseSchoolFile(file: File) {
     setSchoolLoading(true);
     setSchoolParseError('');
     try {
       const payload = await readFileAsPayload(file);
-      if (payload.error) { setSchoolParseError(payload.error); setSchoolLoading(false); return; }
-      const res = await fetch('/api/schedule', {
+      if (payload.error) { setSchoolParseError(payload.error); return; }
+      // Step 1: Claude parsing only (fast, no Xano)
+      const parseRes = await fetch('/api/schedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...payload, childId: child?.id, authToken }),
+        body: JSON.stringify({ ...payload }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        const debugInfo = data.debug_raw ? ` (AI: "${data.debug_raw.substring(0, 80)}...")` : '';
-        setSchoolParseError((data.error || 'שגיאה בניתוח הקובץ') + debugInfo);
-      } else {
-        const grid: Record<string, string> = {};
-        const newSlots: ScheduleSlot[] = (data.slots ?? []) as ScheduleSlot[];
-        newSlots.forEach(slot => {
-          const dayNum = DAY_OF_WEEK_NUM[slot.day_of_week || ''];
-          if (dayNum !== undefined && dayNum <= 4) {
-            const hour = parseTimeHour(slot.start_time || '');
-            if (SCHOOL_PERIODS.includes(hour)) grid[`${dayNum}-${hour}`] = slot.Subject || '';
-          }
-        });
-        setScheduleSlots(newSlots);
-        setSchoolGrid(grid);
-        setShowSchoolModal(false);
-        if (kidDataCache) { kidDataCache.slots = newSlots; applyWeekView(kidDataCache, weekDays(currentDate)); }
-        else fetchWeekData(true);
+      const parseData = await parseRes.json();
+      if (!parseRes.ok) {
+        const debugInfo = parseData.debug_raw ? ` (AI: "${parseData.debug_raw.substring(0, 80)}...")` : '';
+        setSchoolParseError((parseData.error || 'שגיאה בניתוח הקובץ') + debugInfo);
+        return;
       }
+      // Step 2: Save to Xano (fast, no Claude)
+      await saveScheduleSlots(parseData.slots ?? []);
     } catch { setSchoolParseError('שגיאת רשת'); }
     finally { setSchoolLoading(false); }
   }
@@ -669,37 +682,19 @@ export default function KidDashboard() {
     setSchoolLoading(true);
     setSchoolParseError('');
     try {
-      const res = await fetch('/api/schedule', {
+      // Step 1: Claude parsing only
+      const parseRes = await fetch('/api/schedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: schoolText, childId: child?.id, authToken }),
+        body: JSON.stringify({ text: schoolText }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setSchoolParseError(data.error || 'שגיאה בניתוח הטקסט');
-      } else {
-        // Populate grid from returned slots
-        const grid: Record<string, string> = {};
-        const newSlots: ScheduleSlot[] = (data.slots ?? []) as ScheduleSlot[];
-        newSlots.forEach(slot => {
-          const dayNum = DAY_OF_WEEK_NUM[slot.day_of_week || ''];
-          if (dayNum !== undefined && dayNum <= 4) {
-            const hour = parseTimeHour(slot.start_time || '');
-            if (SCHOOL_PERIODS.includes(hour)) grid[`${dayNum}-${hour}`] = slot.Subject || '';
-          }
-        });
-        setScheduleSlots(newSlots);
-        setSchoolGrid(grid);
-        setSchoolText('');
-        setShowSchoolModal(false);
-        if (kidDataCache) { kidDataCache.slots = newSlots; applyWeekView(kidDataCache, weekDays(currentDate)); }
-        else fetchWeekData(true);
-      }
-    } catch {
-      setSchoolParseError('שגיאת רשת');
-    } finally {
-      setSchoolLoading(false);
-    }
+      const parseData = await parseRes.json();
+      if (!parseRes.ok) { setSchoolParseError(parseData.error || 'שגיאה בניתוח הטקסט'); return; }
+      // Step 2: Save to Xano
+      setSchoolText('');
+      await saveScheduleSlots(parseData.slots ?? []);
+    } catch { setSchoolParseError('שגיאת רשת'); }
+    finally { setSchoolLoading(false); }
   }
 
   async function submitSchoolSchedule() {
