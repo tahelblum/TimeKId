@@ -24,13 +24,16 @@ async function fetchAllSlots(metaToken: string): Promise<unknown[]> {
   return items;
 }
 
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
 async function deleteSlotsMeta(metaToken: string, ids: number[]) {
-  await Promise.all(ids.map(id =>
-    fetch(`${XANO_META}/api:meta/workspace/136523/table/${TABLE_ID}/content/${id}`, {
+  for (const id of ids) {
+    await fetch(`${XANO_META}/api:meta/workspace/136523/table/${TABLE_ID}/content/${id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${metaToken}` },
-    })
-  ));
+    });
+    if (ids.length > 5) await sleep(80);
+  }
 }
 
 // GET /api/schedule?childId=N
@@ -156,23 +159,29 @@ export async function POST(req: NextRequest) {
     .map((s) => (s as Record<string, unknown>).id as number);
   await deleteSlotsMeta(metaToken, toDelete);
 
-  // Create new slots
+  // Create new slots — sequential with backoff to avoid Xano rate limits
   const created: unknown[] = [];
   for (const slot of slots) {
-    try {
-      const r = await fetch(`${XANO_API}/child/schedule`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          Subject: slot.Subject,
-          day_of_week: slot.day_of_week,
-          start_time: slot.start_time,
-          endtime: slot.endtime,
-          created_by_role: 'child',
-        }),
-      });
-      if (r.ok) created.push(await r.json());
-    } catch {}
+    let r: Response | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await sleep(600 * attempt);
+      try {
+        r = await fetch(`${XANO_API}/child/schedule`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            Subject: slot.Subject,
+            day_of_week: slot.day_of_week,
+            start_time: slot.start_time,
+            endtime: slot.endtime,
+            created_by_role: 'child',
+          }),
+        });
+        if (r.status !== 429) break;
+      } catch { break; }
+    }
+    if (r?.ok) created.push(await r.json());
+    await sleep(120);
   }
 
   console.log(`[/api/schedule POST] replaced: deleted ${toDelete.length}, created ${created.length}`);
