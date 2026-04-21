@@ -173,6 +173,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
   const [view, setView] = useState<'day' | 'week'>('day');
   const [currentDate, setCurrentDate] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; });
   const calBodyRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const [activeModal, setActiveModal] = useState<null | 'bot' | 'document' | 'compliment' | 'reminder' | 'secondary' | 'study-planner' | 'add-task'>(null);
   const [upcomingTests, setUpcomingTests] = useState<Task[]>([]);
@@ -251,27 +252,47 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     if (childFetchInFlight[childId]) return;
     childFetchInFlight[childId] = true;
 
+    // Cancel any previous in-flight request (e.g. from a prior child) before starting
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const signal = controller.signal;
+
     setTasksLoading(true);
     const auth = { 'Authorization': `Bearer ${authToken}` };
     try {
       // 3 calls total — once per 30 min regardless of how many weeks the user browses
       const [tasksRes, examsRes, slotsRes] = await Promise.all([
-        fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}`, { headers: auth }),
-        fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.EXAMS(childId)}`, { headers: auth }).catch(() => null),
-        fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.SCHEDULE(childId)}`, { headers: auth }).catch(() => null),
+        fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.TASKS(childId)}`, { headers: auth, signal }),
+        fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.EXAMS(childId)}`, { headers: auth, signal }).catch(() => null),
+        fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.SCHEDULE(childId)}`, { headers: auth, signal }).catch(() => null),
       ]);
+      if (tasksRes.status === 401) { router.push('/'); return; }
       const tasks: Task[]        = tasksRes.ok  ? extractArray(await tasksRes.json())          : [];
       const exams: Exam[]        = examsRes?.ok  ? toAnyArray(await examsRes.json()) as Exam[]  : [];
       const slots: ScheduleSlot[] = slotsRes?.ok ? toAnyArray(await slotsRes.json()) as ScheduleSlot[] : [];
       childDataCache[childId] = { tasks, exams, slots, fetchedAt: now };
       applyWeekView(childDataCache[childId], days);
-    } catch { setWeekAllTasks([]); } finally { setTasksLoading(false); childFetchInFlight[childId] = false; }
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') setWeekAllTasks([]);
+    } finally { setTasksLoading(false); childFetchInFlight[childId] = false; }
   }, [currentDate, childId, authToken]);
+
+  // Abort any in-flight requests when the component unmounts (navigating away from a child)
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
 
   useEffect(() => {
     if (!authLoading && !authToken) router.push('/');
   }, [authLoading, authToken, router]);
-  useEffect(() => { fetchWeekData(); }, [fetchWeekData]);
+  useEffect(() => {
+    // Debounce: if navigating rapidly between kids, don't fire until settled for 300ms.
+    // This prevents 429s on Xano — the timer is cleared on unmount so zero requests
+    // are sent for kids you navigate away from before 300ms.
+    const timer = setTimeout(() => fetchWeekData(), 300);
+    return () => clearTimeout(timer);
+  }, [fetchWeekData]);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [botMessages]);
   useEffect(() => {
     if (calBodyRef.current) {
@@ -280,13 +301,20 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     }
   }, [view]);
 
-  async function fetchChild() {
+  async function fetchChild(signal?: AbortSignal) {
+    if (!authToken) return;
     try {
-      const res = await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.GET(childId)}`, { headers: { 'Authorization': `Bearer ${authToken}` } });
+      const res = await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.GET(childId)}`, { headers: { 'Authorization': `Bearer ${authToken}` }, signal });
+      if (res.status === 401) { router.push('/'); return; }
       if (res.ok) setChild(await res.json());
-    } catch {}
+    } catch (e) { if ((e as Error).name !== 'AbortError') console.error(e); }
   }
-  useEffect(() => { fetchChild(); }, [childId]);
+  useEffect(() => {
+    if (!authToken) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => fetchChild(controller.signal), 300);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [childId, authToken]);
 
 
   // ─── Actions ──────────────────────────────────────────────────────────────

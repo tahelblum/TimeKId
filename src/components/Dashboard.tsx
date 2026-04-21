@@ -31,6 +31,7 @@ export default function Dashboard() {
       const res = await fetch(`${PARENT_API_URL}/manage_children/get`, {
         headers: { 'Authorization': `Bearer ${authToken}` },
       });
+      if (res.status === 401) { logout(); router.push('/'); return; }
       if (!res.ok) throw new Error();
       const d = await res.json(); setChildren(Array.isArray(d) ? d : (d.items ?? []));
     } catch {

@@ -856,7 +856,12 @@ export default function KidDashboard() {
 
   // All real tasks (persists across week navigation) — used for task lists & progress
   const allPending = allRealTasksState.filter(t => t.status !== 'done');
-  const allDone    = allRealTasksState.filter(t => t.status === 'done');
+  const visibleReal = weekAllTasks.filter(t => {
+    if (t._virtual) return false;
+    const d = new Date(t.due_date * 1000); d.setHours(0, 0, 0, 0);
+    return view === 'day' ? sameDay(d, currentDate) : d >= wDays[0] && d <= wDays[6];
+  });
+  const allDone    = visibleReal.filter(t => t.status === 'done');
 
   const doneCnt = visibleTasks.filter(t => t.status === 'done').length;
   const pendingTasks = visibleTasks.filter(t => t.status !== 'done');
@@ -965,14 +970,14 @@ export default function KidDashboard() {
         )}
 
         {/* ── PROGRESS BAR ── */}
-        {allRealTasksState.length > 0 && (
+        {visibleReal.length > 0 && (
           <div className="kid-progress-wrap">
             <div className="kid-progress-label">
-              <span>{allDone.length} / {allRealTasksState.length} הושלמו</span>
-              <span>{Math.round((allDone.length / allRealTasksState.length) * 100)}%</span>
+              <span>{allDone.length} / {visibleReal.length} הושלמו</span>
+              <span>{Math.round((allDone.length / visibleReal.length) * 100)}%</span>
             </div>
             <div className="kid-progress-bar">
-              <div className="kid-progress-fill" style={{ width: `${(allDone.length / allRealTasksState.length) * 100}%` }} />
+              <div className="kid-progress-fill" style={{ width: `${(allDone.length / visibleReal.length) * 100}%` }} />
             </div>
           </div>
         )}
