@@ -622,8 +622,8 @@ export default function KidDashboard() {
         setScheduleSlots(newSlots);
         setSchoolGrid(grid);
         setShowSchoolModal(false);
-        if (kidDataCache) kidDataCache = null;
-        fetchWeekData(true);
+        if (kidDataCache) { kidDataCache.slots = newSlots; applyWeekView(kidDataCache, weekDays(currentDate)); }
+        else fetchWeekData(true);
       }
     } catch { setSchoolParseError('שגיאת רשת'); }
     finally { setSchoolLoading(false); }
@@ -692,8 +692,8 @@ export default function KidDashboard() {
         setSchoolGrid(grid);
         setSchoolText('');
         setShowSchoolModal(false);
-        if (kidDataCache) kidDataCache = null;
-        fetchWeekData(true);
+        if (kidDataCache) { kidDataCache.slots = newSlots; applyWeekView(kidDataCache, weekDays(currentDate)); }
+        else fetchWeekData(true);
       }
     } catch {
       setSchoolParseError('שגיאת רשת');
@@ -735,8 +735,8 @@ export default function KidDashboard() {
     setSchoolLoading(false);
     setShowSchoolModal(false);
     setSchoolGrid({});
-    if (kidDataCache) kidDataCache = null;
-    fetchWeekData(true);
+    if (kidDataCache) { kidDataCache.slots = created; applyWeekView(kidDataCache, weekDays(currentDate)); }
+    else fetchWeekData(true);
   }
 
   // Returns pre-filled datetime-local strings spread before the test
