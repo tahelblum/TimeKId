@@ -85,7 +85,12 @@ const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frid
 const DAY_OF_WEEK_NUM: Record<string, number> = {
   Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6,
 };
-function parseTimeHour(t: string): number { return parseInt((t || '12').split(':')[0]) || 12; }
+function parseTimeHour(t: string): number {
+  const parts = (t || '12:00').split(':');
+  const h = parseInt(parts[0]) || 12;
+  const m = parseInt(parts[1]) || 0;
+  return m >= 30 ? h + 1 : h; // round so 8:55→9, 9:50→10, prevents same-hour collisions
+}
 function toAnyArray(d: unknown): unknown[] {
   if (Array.isArray(d)) return d;
   if (d && typeof d === 'object') {

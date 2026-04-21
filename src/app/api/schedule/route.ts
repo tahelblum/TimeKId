@@ -111,17 +111,38 @@ export async function PUT(req: NextRequest) {
   return NextResponse.json({ deleted, created: created.length, slots: created });
 }
 
-const SCHEDULE_SYSTEM = `You are a helper that parses Israeli school timetables (Hebrew or English).
-Extract schedule slots and return ONLY a JSON array. Each slot:
-{ "day_of_week": "Sunday|Monday|Tuesday|Wednesday|Thursday|Friday", "Subject": "<exact subject name as written>", "start_time": "HH:MM", "endtime": "HH:MM" }
-Hebrew days: ראשון=Sunday, שני=Monday, שלישי=Tuesday, רביעי=Wednesday, חמישי=Thursday, שישי=Friday
-If end time not given, add 45 minutes. If no time at all, use 08:00 for the first slot and add 45 min per subsequent slot.
-Rules:
-- Extract subjects as written — do NOT translate, do NOT invent
-- Skip empty or unclear cells
-- If the input looks like a list of subjects per day (even without times), still extract them
-- Return ONLY the JSON array, no markdown, no explanation
-- If you cannot find any schedule data at all, return []`;
+const SCHEDULE_SYSTEM = `You are parsing an Israeli school weekly timetable (מערכת שעות שבועית).
+
+STRUCTURE: The timetable is a grid.
+- COLUMNS = days of the week. Column headers are Hebrew day names (ראשון, שני, שלישי, רביעי, חמישי, שישי) or English (Sunday–Friday). The table may be RTL so columns may appear right-to-left.
+- ROWS = lesson periods. Each row is labeled with a lesson number (שיעור 1, שיעור 2, etc.) or a time range (08:00-08:45).
+- Each CELL contains the subject name for that day at that lesson period.
+
+HEBREW DAYS: ראשון=Sunday, שני=Monday, שלישי=Tuesday, רביעי=Wednesday, חמישי=Thursday, שישי=Friday
+
+LESSON TIMES — use these standard times when no explicit time is shown:
+Period 1: 08:00-08:45
+Period 2: 08:55-09:40
+Period 3: 09:50-10:35
+Period 4: 10:45-11:30
+Period 5: 11:40-12:25
+Period 6: 12:35-13:20
+Period 7: 13:30-14:15
+Period 8: 14:25-15:10
+Period 9: 15:20-16:05
+Period 10: 16:15-17:00
+
+OUTPUT: Return ONLY a JSON array, no markdown, no explanation:
+[{"day_of_week":"Sunday","Subject":"מתמטיקה","start_time":"08:00","endtime":"08:45"}]
+
+RULES:
+- Read every column carefully — each column is ONE specific day
+- Read every row — each row is ONE lesson period
+- Copy subject names EXACTLY as written in Hebrew — do NOT translate or paraphrase
+- Skip empty cells and cells with dashes or dots
+- Each extracted cell = one JSON object in the array
+- If you cannot find schedule data, return []`;
+
 
 // POST /api/schedule — AI parsing ONLY, returns parsed slots without saving
 // Client must follow up with PUT /api/schedule to persist
