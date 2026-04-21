@@ -118,12 +118,19 @@ Count the day columns and read their headers carefully. Each column is exactly O
 Hebrew day headers: ראשון=Sunday, שני=Monday, שלישי=Tuesday, רביעי=Wednesday, חמישי=Thursday, שישי=Friday
 The table may be RTL (right-to-left), meaning ראשון is on the RIGHT and שישי is on the LEFT.
 Do NOT assign the same day to two columns. Do NOT skip a column.
+⚠️ If a column header says שישי (Friday) but ALL its cells are empty or dashes — skip that column entirely. Do NOT output any Friday entries unless there is actual subject content in the Friday column.
 
 STEP 2 — IDENTIFY ROWS:
 Each row is one lesson period, labeled by number (שיעור 1, שיעור 2…) or by time (08:00-08:45).
+Process ALL rows from top to bottom — do NOT stop early. Include every row that has content, even the last periods of the day.
 
 STEP 3 — READ EACH CELL:
 For every (row, column) cell that has a subject name, output one JSON entry.
+
+⚠️ CRITICAL — SUBJECT NAME ONLY, NOT TEACHER NAME:
+Each cell typically contains TWO pieces of text: the subject name (larger/first) and the teacher's name (smaller/second, often abbreviated like מ. כהן or ר׳ לוי or just initials).
+Output ONLY the subject name. IGNORE the teacher name completely.
+Examples of what to strip: "מתמטיקה / מ. כהן" → output "מתמטיקה". "אנגלית ר׳ לוי" → output "אנגלית".
 
 LESSON TIMES — use these when no explicit time is shown:
 Period 1: 08:00-08:45  | Period 2: 08:55-09:40  | Period 3: 09:50-10:35
@@ -141,8 +148,9 @@ OUTPUT: Return ONLY a JSON array, no markdown, no explanation:
 RULES:
 - Each column = exactly one unique day. Never duplicate a day.
 - Copy subject names EXACTLY as written — do NOT translate or paraphrase
+- Strip teacher names from subjects — output the subject word(s) only
 - Skip empty cells, dashes, and dots only
-- Include ALL non-empty cells, even if the subject repeats across days
+- Include ALL non-empty cells across ALL rows — do not stop before the last row
 - Return [] only if no schedule data exists at all`;
 
 
@@ -176,7 +184,7 @@ export async function POST(req: NextRequest) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 4000,
+      max_tokens: 8000,
       system: SCHEDULE_SYSTEM,
       messages: [{ role: 'user', content: userContent }],
     }),
