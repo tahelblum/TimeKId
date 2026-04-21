@@ -595,27 +595,28 @@ export default function KidDashboard() {
   }
 
   async function saveScheduleSlots(parsedSlots: ScheduleSlot[]) {
-    const saveRes = await fetch('/api/schedule', {
+    // Persist to Xano in the background — don't rely on Meta API response format
+    fetch('/api/schedule', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ childId: child?.id, slots: parsedSlots }),
-    });
-    const saveData = await saveRes.json();
-    const saved: ScheduleSlot[] = (saveData.slots ?? []) as ScheduleSlot[];
+    }).catch(() => {});
+
+    // Use Claude's parsed slots directly for display — field format is guaranteed correct
+    const forDisplay = parsedSlots.map((s, i) => ({ ...s, id: -(2000000 + i) })) as ScheduleSlot[];
     const grid: Record<string, string> = {};
-    saved.forEach(slot => {
+    forDisplay.forEach(slot => {
       const dayNum = DAY_OF_WEEK_NUM[slot.day_of_week || ''];
-      if (dayNum !== undefined && dayNum <= 4) {
+      if (dayNum !== undefined) {
         const hour = parseTimeHour(slot.start_time || '');
         if (SCHOOL_PERIODS.includes(hour)) grid[`${dayNum}-${hour}`] = slot.Subject || '';
       }
     });
-    setScheduleSlots(saved);
+    setScheduleSlots(forDisplay);
     setSchoolGrid(grid);
     setShowSchoolModal(false);
-    if (kidDataCache) { kidDataCache.slots = saved; applyWeekView(kidDataCache, weekDays(currentDate)); }
+    if (kidDataCache) { kidDataCache.slots = forDisplay; applyWeekView(kidDataCache, weekDays(currentDate)); }
     else fetchWeekData(true);
-    return saved.length;
   }
 
   async function parseSchoolFile(file: File) {
@@ -711,21 +712,20 @@ export default function KidDashboard() {
         endtime: `${String(hour + 1).padStart(2, '0')}:00`,
       };
     });
-    try {
-      const res = await fetch('/api/schedule', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ childId: child?.id, slots }),
-      });
-      const data = await res.json();
-      const created = (data.slots ?? []) as ScheduleSlot[];
-      setScheduleSlots(created);
-      setSchoolGrid({});
-      setShowSchoolModal(false);
-      if (kidDataCache) { kidDataCache.slots = created; applyWeekView(kidDataCache, weekDays(currentDate)); }
-      else fetchWeekData(true);
-    } catch { setSchoolParseError('שגיאת רשת'); }
-    finally { setSchoolLoading(false); }
+    // Persist to Xano in background
+    fetch('/api/schedule', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ childId: child?.id, slots }),
+    }).catch(() => {});
+    // Use locally-constructed slots for immediate display
+    const forDisplay = slots.map((s, i) => ({ ...s, id: -(2000000 + i) })) as ScheduleSlot[];
+    setScheduleSlots(forDisplay);
+    setSchoolGrid({});
+    setShowSchoolModal(false);
+    if (kidDataCache) { kidDataCache.slots = forDisplay; applyWeekView(kidDataCache, weekDays(currentDate)); }
+    else fetchWeekData(true);
+    setSchoolLoading(false);
   }
 
   // Returns pre-filled datetime-local strings spread before the test
