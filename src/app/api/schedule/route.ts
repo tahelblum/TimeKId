@@ -217,6 +217,7 @@ export async function POST(req: NextRequest) {
   }
 
   console.log(`[/api/schedule POST] parsed ${slots.length} slots`);
+  console.log('[/api/schedule POST] first 3 slots:', JSON.stringify(slots.slice(0, 3)));
   // Return parsed slots only — client calls PUT to save
-  return NextResponse.json({ slots });
+  return NextResponse.json({ slots, debug_count: slots.length, debug_first: slots.slice(0, 3) });
 }

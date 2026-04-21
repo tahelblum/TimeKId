@@ -344,6 +344,7 @@ export default function KidDashboard() {
   const [schoolLoading, setSchoolLoading] = useState(false);
   const [schoolText, setSchoolText] = useState('');
   const [schoolParseError, setSchoolParseError] = useState('');
+  const [schoolDebug, setSchoolDebug] = useState('');
   const schoolFileRef = useRef<HTMLInputElement>(null);
 
   // Exams modal
@@ -563,6 +564,8 @@ export default function KidDashboard() {
   }
 
   async function openSchoolModal() {
+    setSchoolDebug('');
+    setSchoolParseError('');
     // Pre-populate grid from existing schedule slots
     const grid: Record<string, string> = {};
     scheduleSlots.forEach(slot => {
@@ -654,8 +657,11 @@ export default function KidDashboard() {
         return;
       }
       // Show parsed result in grid for review — user saves manually
-      setSchoolGrid(slotsToGrid(parseData.slots ?? []));
+      const parsedSlots = parseData.slots ?? [];
+      setSchoolGrid(slotsToGrid(parsedSlots));
       setSchoolParseError('');
+      const firstSlot = parseData.debug_first?.[0];
+      setSchoolDebug(`AI זיהה ${parseData.debug_count ?? parsedSlots.length} שיעורים. ראשון: ${firstSlot ? `${firstSlot.day_of_week} ${firstSlot.start_time} – ${firstSlot.Subject}` : 'אין'}`);
     } catch { setSchoolParseError('שגיאת רשת'); }
     finally { setSchoolLoading(false); }
   }
@@ -1545,6 +1551,7 @@ export default function KidDashboard() {
                 onClick={() => schoolFileRef.current?.click()} disabled={schoolLoading}>
                 <Upload size={16} />{schoolLoading ? 'מנתח...' : 'העלה מערכת שעות מקובץ / תמונה'}
               </button>
+              {schoolDebug && <p style={{ color: '#64748b', fontSize: 11, marginTop: 6 }}>{schoolDebug}</p>}
               <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: 12, margin: '10px 0' }}>— או הדבק טקסט —</p>
               <textarea
                 rows={4}
@@ -1554,6 +1561,7 @@ export default function KidDashboard() {
                 onChange={e => { setSchoolText(e.target.value); setSchoolParseError(''); }}
               />
               {schoolParseError && <p style={{ color: '#e74c3c', fontSize: 12, marginTop: 4 }}>{schoolParseError}</p>}
+              {schoolDebug && <p style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>{schoolDebug}</p>}
               <button className="btn-primary" style={{ marginTop: 8, width: '100%' }}
                 onClick={parseSchoolText}
                 disabled={schoolLoading || !schoolText.trim()}>
