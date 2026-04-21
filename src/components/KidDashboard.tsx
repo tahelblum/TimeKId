@@ -705,38 +705,32 @@ export default function KidDashboard() {
   async function submitSchoolSchedule() {
     const entries = Object.entries(schoolGrid).filter(([, v]) => v.trim());
     setSchoolLoading(true);
-    // Clear existing slots via server route (uses Meta API token)
-    await fetch('/api/schedule', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ childId: child?.id }),
-    }).catch(() => {});
-    // Create new slots
-    const auth = { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' };
-    const created: ScheduleSlot[] = [];
-    for (const [key, subject] of entries) {
+    const slots = entries.map(([key, subject]) => {
       const [dayIdxStr, hourStr] = key.split('-');
       const dayIdx = parseInt(dayIdxStr);
       const hour = parseInt(hourStr);
-      try {
-        const res = await fetch(`${API_URL}${API_ENDPOINTS.CHILD.SCHEDULE}`, {
-          method: 'POST', headers: auth,
-          body: JSON.stringify({
-            day_of_week: DAY_NAMES[dayIdx],
-            Subject: subject,
-            start_time: `${String(hour).padStart(2, '0')}:00`,
-            endtime: `${String(hour + 1).padStart(2, '0')}:00`,
-          }),
-        });
-        if (res.ok) created.push(await res.json());
-      } catch {}
-    }
-    setScheduleSlots(created);
-    setSchoolLoading(false);
-    setShowSchoolModal(false);
-    setSchoolGrid({});
-    if (kidDataCache) { kidDataCache.slots = created; applyWeekView(kidDataCache, weekDays(currentDate)); }
-    else fetchWeekData(true);
+      return {
+        day_of_week: DAY_NAMES[dayIdx],
+        Subject: subject,
+        start_time: `${String(hour).padStart(2, '0')}:00`,
+        endtime: `${String(hour + 1).padStart(2, '0')}:00`,
+      };
+    });
+    try {
+      const res = await fetch('/api/schedule', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ childId: child?.id, slots }),
+      });
+      const data = await res.json();
+      const created = (data.slots ?? []) as ScheduleSlot[];
+      setScheduleSlots(created);
+      setSchoolGrid({});
+      setShowSchoolModal(false);
+      if (kidDataCache) { kidDataCache.slots = created; applyWeekView(kidDataCache, weekDays(currentDate)); }
+      else fetchWeekData(true);
+    } catch { setSchoolParseError('שגיאת רשת'); }
+    finally { setSchoolLoading(false); }
   }
 
   // Returns pre-filled datetime-local strings spread before the test
