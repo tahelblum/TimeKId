@@ -38,15 +38,12 @@ async function deleteChildSlotsMeta(metaToken: string, childId: number): Promise
   return toDelete.length;
 }
 
-const SCHOOL_DAYS = new Set(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday']);
-
 async function createSlotsMeta(
   metaToken: string,
   childId: number,
   slots: Array<{ day_of_week: string; Subject: string; start_time: string; endtime: string }>
 ): Promise<unknown[]> {
-  // Only create Sun–Thu slots (Israeli school week)
-  const filtered = slots.filter(s => SCHOOL_DAYS.has(s.day_of_week));
+  const filtered = slots;
   const results: unknown[] = [];
   // Batch in groups of 5 to avoid overwhelming the Meta API
   for (let i = 0; i < filtered.length; i += 5) {

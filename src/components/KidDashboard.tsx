@@ -595,13 +595,10 @@ export default function KidDashboard() {
   }
 
   async function saveScheduleSlots(parsedSlots: ScheduleSlot[]) {
-    // Israeli school week is Sun–Thu only
-    const schoolWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'];
-    const filtered = parsedSlots.filter(s => schoolWeek.includes(s.day_of_week || ''));
     const saveRes = await fetch('/api/schedule', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ childId: child?.id, slots: filtered }),
+      body: JSON.stringify({ childId: child?.id, slots: parsedSlots }),
     });
     const saveData = await saveRes.json();
     const saved: ScheduleSlot[] = (saveData.slots ?? []) as ScheduleSlot[];
