@@ -5,8 +5,6 @@ const TABLE_ID  = 714667; // schedule_slots
 const WORKSPACE = 136523;
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 
-const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
-
 async function fetchAllSlots(metaToken: string): Promise<unknown[]> {
   const items: unknown[] = [];
   let page = 1;
@@ -31,16 +29,12 @@ async function deleteChildSlotsMeta(metaToken: string, childId: number): Promise
   const toDelete = allSlots
     .filter((s) => (s as Record<string, unknown>).user_id === childId)
     .map((s) => (s as Record<string, unknown>).id as number);
-  // Delete in parallel batches of 5 to stay within Meta API limits
-  for (let i = 0; i < toDelete.length; i += 5) {
-    await Promise.all(toDelete.slice(i, i + 5).map(id =>
-      fetch(`${XANO_META}/api:meta/workspace/${WORKSPACE}/table/${TABLE_ID}/content/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${metaToken}` },
-      })
-    ));
-    if (i + 5 < toDelete.length) await sleep(200);
-  }
+  await Promise.all(toDelete.map(id =>
+    fetch(`${XANO_META}/api:meta/workspace/${WORKSPACE}/table/${TABLE_ID}/content/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${metaToken}` },
+    }).catch(() => {})
+  ));
   return toDelete.length;
 }
 
@@ -49,27 +43,23 @@ async function createSlotsMeta(
   childId: number,
   slots: Array<{ day_of_week: string; Subject: string; start_time: string; endtime: string }>
 ): Promise<unknown[]> {
-  const created: unknown[] = [];
-  for (const slot of slots) {
-    try {
-      const r = await fetch(
-        `${XANO_META}/api:meta/workspace/${WORKSPACE}/table/${TABLE_ID}/content`,
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${metaToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: childId,
-            Subject: slot.Subject,
-            day_of_week: slot.day_of_week,
-            start_time: slot.start_time,
-            endtime: slot.endtime,
-          }),
-        }
-      );
-      if (r.ok) created.push(await r.json());
-    } catch {}
-  }
-  return created;
+  const results = await Promise.all(slots.map(slot =>
+    fetch(
+      `${XANO_META}/api:meta/workspace/${WORKSPACE}/table/${TABLE_ID}/content`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${metaToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: childId,
+          Subject: slot.Subject,
+          day_of_week: slot.day_of_week,
+          start_time: slot.start_time,
+          endtime: slot.endtime,
+        }),
+      }
+    ).then(r => r.ok ? r.json() : null).catch(() => null)
+  ));
+  return results.filter(Boolean);
 }
 
 // GET /api/schedule?childId=N
