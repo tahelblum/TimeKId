@@ -138,8 +138,8 @@ function holidayToTasks(holiday: Holiday, days: Date[]): Task[] {
 
 // ─── Calendar / school constants ──────────────────────────────────────────────
 const GRID_HOURS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
-const SCHOOL_PERIODS = [8, 9, 10, 11, 12, 13, 14];
-const SCHOOL_DAYS_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי'];
+const SCHOOL_PERIODS = [7, 8, 9, 10, 11, 12, 13, 14, 15];
+const SCHOOL_DAYS_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי'];
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const ENCOURAGING = [
@@ -563,7 +563,7 @@ export default function KidDashboard() {
     scheduleSlots.forEach(slot => {
       const dayKey = slot.day_of_week || slot.dayofweek || slot.day || '';
       const dayNum = DAY_OF_WEEK_NUM[dayKey];
-      if (dayNum !== undefined && dayNum <= 4) {
+      if (dayNum !== undefined && dayNum <= 5) {
         const hour = parseTimeHour(slot.start_time || slot.startTime || '');
         if (SCHOOL_PERIODS.includes(hour)) grid[`${dayNum}-${hour}`] = slot.Subject || slot.subject || '';
       }
@@ -619,13 +619,24 @@ export default function KidDashboard() {
     else fetchWeekData(true);
   }
 
+  function slotsToGrid(slots: Array<{ day_of_week?: string; Subject?: string; start_time?: string }>): Record<string, string> {
+    const grid: Record<string, string> = {};
+    slots.forEach(slot => {
+      const dayNum = DAY_OF_WEEK_NUM[slot.day_of_week || ''];
+      if (dayNum !== undefined && dayNum <= 5) {
+        const hour = parseTimeHour(slot.start_time || '');
+        if (SCHOOL_PERIODS.includes(hour)) grid[`${dayNum}-${hour}`] = slot.Subject || '';
+      }
+    });
+    return grid;
+  }
+
   async function parseSchoolFile(file: File) {
     setSchoolLoading(true);
     setSchoolParseError('');
     try {
       const payload = await readFileAsPayload(file);
       if (payload.error) { setSchoolParseError(payload.error); return; }
-      // Step 1: Claude parsing only (fast, no Xano)
       const parseRes = await fetch('/api/schedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -637,8 +648,9 @@ export default function KidDashboard() {
         setSchoolParseError((parseData.error || 'שגיאה בניתוח הקובץ') + debugInfo);
         return;
       }
-      // Step 2: Save to Xano (fast, no Claude)
-      await saveScheduleSlots(parseData.slots ?? []);
+      // Show parsed result in grid for review — user saves manually
+      setSchoolGrid(slotsToGrid(parseData.slots ?? []));
+      setSchoolParseError('');
     } catch { setSchoolParseError('שגיאת רשת'); }
     finally { setSchoolLoading(false); }
   }
@@ -683,7 +695,6 @@ export default function KidDashboard() {
     setSchoolLoading(true);
     setSchoolParseError('');
     try {
-      // Step 1: Claude parsing only
       const parseRes = await fetch('/api/schedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -691,9 +702,9 @@ export default function KidDashboard() {
       });
       const parseData = await parseRes.json();
       if (!parseRes.ok) { setSchoolParseError(parseData.error || 'שגיאה בניתוח הטקסט'); return; }
-      // Step 2: Save to Xano
+      // Show parsed result in grid for review — user saves manually
+      setSchoolGrid(slotsToGrid(parseData.slots ?? []));
       setSchoolText('');
-      await saveScheduleSlots(parseData.slots ?? []);
     } catch { setSchoolParseError('שגיאת רשת'); }
     finally { setSchoolLoading(false); }
   }
@@ -1557,7 +1568,7 @@ export default function KidDashboard() {
                   {SCHOOL_PERIODS.map(hour => (
                     <tr key={hour}>
                       <td className="sg-td sg-time-col">{String(hour).padStart(2, '0')}:00</td>
-                      {[0, 1, 2, 3, 4].map(dayIdx => {
+                      {[0, 1, 2, 3, 4, 5].map(dayIdx => {
                         const key = `${dayIdx}-${hour}`;
                         return (
                           <td key={dayIdx} className="sg-td">
