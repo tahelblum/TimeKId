@@ -38,28 +38,38 @@ async function deleteChildSlotsMeta(metaToken: string, childId: number): Promise
   return toDelete.length;
 }
 
+const SCHOOL_DAYS = new Set(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday']);
+
 async function createSlotsMeta(
   metaToken: string,
   childId: number,
   slots: Array<{ day_of_week: string; Subject: string; start_time: string; endtime: string }>
 ): Promise<unknown[]> {
-  const results = await Promise.all(slots.map(slot =>
-    fetch(
-      `${XANO_META}/api:meta/workspace/${WORKSPACE}/table/${TABLE_ID}/content`,
-      {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${metaToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: childId,
-          Subject: slot.Subject,
-          day_of_week: slot.day_of_week,
-          start_time: slot.start_time,
-          endtime: slot.endtime,
-        }),
-      }
-    ).then(r => r.ok ? r.json() : null).catch(() => null)
-  ));
-  return results.filter(Boolean);
+  // Only create Sun–Thu slots (Israeli school week)
+  const filtered = slots.filter(s => SCHOOL_DAYS.has(s.day_of_week));
+  const results: unknown[] = [];
+  // Batch in groups of 5 to avoid overwhelming the Meta API
+  for (let i = 0; i < filtered.length; i += 5) {
+    const batch = filtered.slice(i, i + 5);
+    const batchResults = await Promise.all(batch.map(slot =>
+      fetch(
+        `${XANO_META}/api:meta/workspace/${WORKSPACE}/table/${TABLE_ID}/content`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${metaToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: childId,
+            Subject: slot.Subject,
+            day_of_week: slot.day_of_week,
+            start_time: slot.start_time,
+            endtime: slot.endtime,
+          }),
+        }
+      ).then(r => r.ok ? r.json() : null).catch(() => null)
+    ));
+    results.push(...batchResults.filter(Boolean));
+  }
+  return results;
 }
 
 // GET /api/schedule?childId=N
