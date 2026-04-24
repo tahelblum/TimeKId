@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const maxDuration = 60; // Vercel: allow up to 60 s (image parsing can be slow)
+
 const XANO_META = 'https://x8ki-letl-twmt.n7.xano.io';
 const TABLE_ID  = 714667; // schedule_slots
 const WORKSPACE = 136523;
@@ -183,7 +185,7 @@ export async function POST(req: NextRequest) {
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 8000,
       system: SCHEDULE_SYSTEM,
       messages: [{ role: 'user', content: userContent }],
@@ -192,7 +194,11 @@ export async function POST(req: NextRequest) {
 
   if (!aiRes.ok) {
     const err = await aiRes.text();
-    return NextResponse.json({ error: `שגיאת AI (${aiRes.status}): ${err.substring(0, 100)}` }, { status: 500 });
+    console.error('[/api/schedule POST] Anthropic error', aiRes.status, err.substring(0, 500));
+    const msg = (() => {
+      try { return (JSON.parse(err) as { error?: { message?: string } }).error?.message ?? err; } catch { return err; }
+    })();
+    return NextResponse.json({ error: `שגיאת AI (${aiRes.status}): ${msg.substring(0, 200)}` }, { status: 500 });
   }
 
   const aiData = await aiRes.json();
