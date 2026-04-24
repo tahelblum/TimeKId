@@ -160,69 +160,82 @@ RULES:
 // POST /api/schedule — AI parsing ONLY, returns parsed slots without saving
 // Client must follow up with PUT /api/schedule to persist
 export async function POST(req: NextRequest) {
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  if (!anthropicKey) return NextResponse.json({ error: 'server misconfigured' }, { status: 500 });
-
-  const { text, image_base64, image_type } = await req.json() as {
-    text?: string; image_base64?: string; image_type?: string;
-  };
-  if (!text && !image_base64) {
-    return NextResponse.json({ error: 'missing fields' }, { status: 400 });
-  }
-
-  const userContent = image_base64
-    ? [
-        { type: 'image', source: { type: 'base64', media_type: image_type || 'image/jpeg', data: image_base64 } },
-        { type: 'text', text: 'Extract every schedule slot from this timetable. Include period 1 (first data row). Output JSON array only.' },
-      ]
-    : (text ?? '').substring(0, 8000);
-
-  const aiRes = await fetch(ANTHROPIC_API, {
-    method: 'POST',
-    headers: {
-      'x-api-key': anthropicKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 8000,
-      system: SCHEDULE_SYSTEM,
-      messages: [{ role: 'user', content: userContent }],
-    }),
-  });
-
-  if (!aiRes.ok) {
-    const err = await aiRes.text();
-    console.error('[/api/schedule POST] Anthropic error', aiRes.status, err.substring(0, 500));
-    const msg = (() => {
-      try { return (JSON.parse(err) as { error?: { message?: string } }).error?.message ?? err; } catch { return err; }
-    })();
-    return NextResponse.json({ error: `שגיאת AI (${aiRes.status}): ${msg.substring(0, 200)}` }, { status: 500 });
-  }
-
-  const aiData = await aiRes.json();
-  const raw = (aiData?.content?.[0]?.text ?? '').trim();
-  console.log('[/api/schedule POST] AI raw (first 600):', raw.substring(0, 600));
-
-  let slots: Array<{ day_of_week: string; Subject: string; start_time: string; endtime: string }> = [];
   try {
-    const cleaned = raw.replace(/```(?:json)?\n?/g, '').trim();
-    const match = cleaned.match(/\[[\s\S]*\]/);
-    if (match) slots = JSON.parse(match[0]);
-  } catch {
-    return NextResponse.json({ error: 'לא הצלחתי לקרוא את התגובה מה-AI' }, { status: 422 });
-  }
+    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+    if (!anthropicKey) return NextResponse.json({ error: 'server misconfigured: missing API key' }, { status: 500 });
 
-  if (slots.length === 0) {
-    const hint = raw.length < 10
-      ? 'הקובץ שהועלה לא נקרא כראוי. נסה להעלות תמונה (צילום מסך) של מערכת השעות.'
-      : 'לא זוהו שיעורים. ודא שהתוכן הוא מערכת שעות שבועית עם ימים ומקצועות.';
-    return NextResponse.json({ error: hint, debug_raw: raw.substring(0, 300) }, { status: 422 });
-  }
+    let body: { text?: string; image_base64?: string; image_type?: string };
+    try {
+      body = await req.json() as typeof body;
+    } catch (e) {
+      console.error('[/api/schedule POST] body parse failed:', e);
+      return NextResponse.json({ error: 'הקובץ גדול מדי או פגום. נסה תמונה קטנה יותר.' }, { status: 400 });
+    }
+    const { text, image_base64, image_type } = body;
 
-  console.log(`[/api/schedule POST] parsed ${slots.length} slots`);
-  console.log('[/api/schedule POST] first 3 slots:', JSON.stringify(slots.slice(0, 3)));
-  // Return parsed slots only — client calls PUT to save
-  return NextResponse.json({ slots, debug_count: slots.length, debug_first: slots.slice(0, 3) });
+    if (!text && !image_base64) {
+      return NextResponse.json({ error: 'missing fields' }, { status: 400 });
+    }
+
+    console.log('[/api/schedule POST] start — image:', !!image_base64, 'text len:', text?.length ?? 0);
+
+    const userContent = image_base64
+      ? [
+          { type: 'image', source: { type: 'base64', media_type: image_type || 'image/jpeg', data: image_base64 } },
+          { type: 'text', text: 'Extract every schedule slot from this timetable. Include period 1 (first data row). Output JSON array only.' },
+        ]
+      : (text ?? '').substring(0, 8000);
+
+    const aiRes = await fetch(ANTHROPIC_API, {
+      method: 'POST',
+      headers: {
+        'x-api-key': anthropicKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 4000,
+        system: SCHEDULE_SYSTEM,
+        messages: [{ role: 'user', content: userContent }],
+      }),
+    });
+
+    if (!aiRes.ok) {
+      const err = await aiRes.text();
+      console.error('[/api/schedule POST] Anthropic error', aiRes.status, err.substring(0, 500));
+      const msg = (() => {
+        try { return (JSON.parse(err) as { error?: { message?: string } }).error?.message ?? err; } catch { return err; }
+      })();
+      return NextResponse.json({ error: `שגיאת AI (${aiRes.status}): ${msg.substring(0, 200)}` }, { status: 500 });
+    }
+
+    const aiData = await aiRes.json();
+    const raw = (aiData?.content?.[0]?.text ?? '').trim();
+    console.log('[/api/schedule POST] AI raw (first 600):', raw.substring(0, 600));
+
+    let slots: Array<{ day_of_week: string; Subject: string; start_time: string; endtime: string }> = [];
+    try {
+      const cleaned = raw.replace(/```(?:json)?\n?/g, '').trim();
+      const match = cleaned.match(/\[[\s\S]*\]/);
+      if (match) slots = JSON.parse(match[0]);
+    } catch {
+      return NextResponse.json({ error: 'לא הצלחתי לקרוא את התגובה מה-AI' }, { status: 422 });
+    }
+
+    if (slots.length === 0) {
+      const hint = raw.length < 10
+        ? 'הקובץ שהועלה לא נקרא כראוי. נסה להעלות תמונה (צילום מסך) של מערכת השעות.'
+        : 'לא זוהו שיעורים. ודא שהתוכן הוא מערכת שעות שבועית עם ימים ומקצועות.';
+      return NextResponse.json({ error: hint, debug_raw: raw.substring(0, 300) }, { status: 422 });
+    }
+
+    console.log(`[/api/schedule POST] parsed ${slots.length} slots`);
+    console.log('[/api/schedule POST] first 3 slots:', JSON.stringify(slots.slice(0, 3)));
+    // Return parsed slots only — client calls PUT to save
+    return NextResponse.json({ slots, debug_count: slots.length, debug_first: slots.slice(0, 3) });
+  } catch (err) {
+    console.error('[/api/schedule POST] unhandled error:', err);
+    return NextResponse.json({ error: `שגיאה בשרת: ${String(err).substring(0, 150)}` }, { status: 500 });
+  }
 }
