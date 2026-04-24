@@ -1201,11 +1201,11 @@ body {
   max-height: 58vh;
   position: relative;
 }
-/* Row = one hour slot across all columns */
+/* Row = one 30-min slot across all columns */
 .sc-row {
   display: flex;
   border-bottom: 1px solid #f0f0f0;
-  min-height: 56px;
+  min-height: 36px;
 }
 .sc-allday-row { min-height: 40px; background: #fafafa; }
 .sc-time-label {

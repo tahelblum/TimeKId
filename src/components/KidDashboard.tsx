@@ -86,10 +86,13 @@ const DAY_OF_WEEK_NUM: Record<string, number> = {
   Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6,
 };
 function parseTimeHour(t: string): number {
-  const parts = (t || '12:00').split(':');
-  const h = parseInt(parts[0]) || 12;
+  const parts = (t || '08:00').split(':');
+  const h = parseInt(parts[0]) || 8;
   const m = parseInt(parts[1]) || 0;
-  return m >= 30 ? h + 1 : h; // round so 8:55→9, 9:50→10, prevents same-hour collisions
+  // Round to nearest 30-min slot: <15→:00, 15-44→:30, ≥45→next:00
+  if (m < 15) return h;
+  if (m < 45) return h + 0.5;
+  return h + 1;
 }
 function toAnyArray(d: unknown): unknown[] {
   if (Array.isArray(d)) return d;
@@ -142,8 +145,10 @@ function holidayToTasks(holiday: Holiday, days: Date[]): Task[] {
 }
 
 // ─── Calendar / school constants ──────────────────────────────────────────────
-const GRID_HOURS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
-const SCHOOL_PERIODS = [7, 8, 9, 10, 11, 12, 13, 14, 15];
+// Half-hour slots: 7:00, 7:30, 8:00, … 21:00
+const GRID_HOURS: number[] = Array.from({ length: (21 - 7) * 2 + 1 }, (_, i) => 7 + i * 0.5);
+// School grid modal slots: 7:00–16:00 in 30-min steps
+const SCHOOL_PERIODS: number[] = Array.from({ length: (16 - 7) * 2 + 1 }, (_, i) => 7 + i * 0.5);
 const SCHOOL_DAYS_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי'];
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -179,13 +184,18 @@ function daysUntil(ts: number): number {
   return Math.round((due.getTime() - now.getTime()) / 86400000);
 }
 function tsFromDateStr(s: string) { return Math.floor(new Date(s + 'T12:00:00').getTime() / 1000); }
-function getTaskHour(ts: number): number { return new Date(ts * 1000).getHours(); }
+function getTaskHour(ts: number): number {
+  const d = new Date(ts * 1000);
+  return d.getHours() + (d.getMinutes() >= 30 ? 0.5 : 0);
+}
 function getTaskTimeLabel(ts: number): string {
   const d = new Date(ts * 1000);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 function tsFromDateAndHour(dateStr: string, hour: number): number {
-  return Math.floor(new Date(`${dateStr}T${String(hour).padStart(2, '0')}:00:00`).getTime() / 1000);
+  const h = Math.floor(hour);
+  const m = hour % 1 >= 0.5 ? 30 : 0;
+  return Math.floor(new Date(`${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`).getTime() / 1000);
 }
 function dayStrOf(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -369,7 +379,7 @@ export default function KidDashboard() {
 
   // Calendar body ref for scrolling to current hour
   const calBodyRef = useRef<HTMLDivElement>(null);
-  const ROW_HEIGHT = 56;
+  const ROW_HEIGHT = 36; // 30-min slots → keep total height manageable
 
   // In-flight guard — prevents concurrent Xano fetches
   const fetchInFlight = useRef(false);
@@ -442,8 +452,10 @@ export default function KidDashboard() {
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
   useEffect(() => {
     if (calBodyRef.current) {
-      const nowIdx = GRID_HOURS.indexOf(new Date().getHours());
-      calBodyRef.current.scrollTop = Math.max(0, (nowIdx - 1) * ROW_HEIGHT);
+      const now = new Date();
+      const nowSlot = now.getHours() + (now.getMinutes() >= 30 ? 0.5 : 0);
+      const nowIdx = GRID_HOURS.indexOf(nowSlot);
+      calBodyRef.current.scrollTop = Math.max(0, (nowIdx - 2) * ROW_HEIGHT);
     }
   }, [view]);
 
@@ -724,15 +736,15 @@ export default function KidDashboard() {
     const entries = Object.entries(schoolGrid).filter(([, v]) => v.trim());
     setSchoolLoading(true);
     const slots = entries.map(([key, subject]) => {
-      const [dayIdxStr, hourStr] = key.split('-');
+      const [dayIdxStr, slotStr] = key.split('-');
       const dayIdx = parseInt(dayIdxStr);
-      const hour = parseInt(hourStr);
-      return {
-        day_of_week: DAY_NAMES[dayIdx],
-        Subject: subject,
-        start_time: `${String(hour).padStart(2, '0')}:00`,
-        endtime: `${String(hour + 1).padStart(2, '0')}:00`,
-      };
+      const slot = parseFloat(slotStr);
+      const h = Math.floor(slot);
+      const m = slot % 1 >= 0.5 ? 30 : 0;
+      const startTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      const endMins = h * 60 + m + 45;
+      const endtime = `${String(Math.floor(endMins / 60)).padStart(2, '0')}:${String(endMins % 60).padStart(2, '0')}`;
+      return { day_of_week: DAY_NAMES[dayIdx], Subject: subject, start_time: startTime, endtime };
     });
     // Persist to Xano in background
     fetch('/api/schedule', {
@@ -1126,12 +1138,13 @@ export default function KidDashboard() {
                 {/* "Now" line */}
                 {(() => {
                   const now = new Date();
-                  const nowIdx = GRID_HOURS.indexOf(now.getHours());
+                  const nowSlot = now.getHours() + (now.getMinutes() >= 30 ? 0.5 : 0);
+                  const nowIdx = GRID_HOURS.indexOf(nowSlot);
                   const showNow = view === 'day'
                     ? sameDay(currentDate, today)
                     : wDays.some(d => sameDay(d, today));
                   if (!showNow || nowIdx < 0) return null;
-                  const top = nowIdx * ROW_HEIGHT + (now.getMinutes() / 60) * ROW_HEIGHT;
+                  const top = nowIdx * ROW_HEIGHT + (now.getMinutes() % 30) / 30 * ROW_HEIGHT;
                   return <div className="sc-now-line" style={{ top }} />;
                 })()}
 
@@ -1168,7 +1181,7 @@ export default function KidDashboard() {
                   const calDays = view === 'day' ? [currentDate] : wDays;
                   return (
                     <div key={hour} className="sc-row">
-                      <div className="sc-time-label">{String(hour).padStart(2, '0')}:00</div>
+                      <div className="sc-time-label">{String(Math.floor(hour)).padStart(2, '0')}:{hour % 1 ? '30' : '00'}</div>
                       {calDays.map((day, di) => {
                         const isToday = sameDay(day, today);
                         const cellTasks = sortByUrgency(
@@ -1360,7 +1373,7 @@ export default function KidDashboard() {
               </div>
               <h2 className="modal-title">הוסף משימה</h2>
               <p className="modal-sub">
-                {HEBREW_DAYS[addTaskCell.day.getDay()]}, {addTaskCell.day.getDate()} {HEBREW_MONTHS[addTaskCell.day.getMonth()]} — {String(addTaskCell.hour).padStart(2, '0')}:00
+                {HEBREW_DAYS[addTaskCell.day.getDay()]}, {addTaskCell.day.getDate()} {HEBREW_MONTHS[addTaskCell.day.getMonth()]} — {String(Math.floor(addTaskCell.hour)).padStart(2, '0')}:{addTaskCell.hour % 1 ? '30' : '00'}
               </p>
             </div>
             <div className="form-field">
@@ -1580,7 +1593,7 @@ export default function KidDashboard() {
                 <tbody>
                   {SCHOOL_PERIODS.map(hour => (
                     <tr key={hour}>
-                      <td className="sg-td sg-time-col">{String(hour).padStart(2, '0')}:00</td>
+                      <td className="sg-td sg-time-col">{String(Math.floor(hour)).padStart(2, '0')}:{hour % 1 ? '30' : '00'}</td>
                       {[0, 1, 2, 3, 4, 5].map(dayIdx => {
                         const key = `${dayIdx}-${hour}`;
                         return (
