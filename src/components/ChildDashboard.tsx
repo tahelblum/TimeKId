@@ -164,7 +164,7 @@ function urgencyKey(ts: number, status: Task['status']): 'done' | 'overdue' | 't
 const TYPE_EMOJI: Record<Task['type'], string> = { homework: '📚', test: '📝', activity: '🎨', school: '🏫', other: '✏️' };
 
 export default function ChildDashboard({ childId }: { childId: number }) {
-  const { authToken, loading: authLoading } = useAuth();
+  const { authToken, loading: authLoading, logout } = useAuth();
   const router = useRouter();
 
   const [child, setChild] = useState<Child | null>(null);
@@ -267,7 +267,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
         fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.EXAMS(childId)}`, { headers: auth, signal }).catch(() => null),
         fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.SCHEDULE(childId)}`, { headers: auth, signal }).catch(() => null),
       ]);
-      if (tasksRes.status === 401) { router.push('/'); return; }
+      if (tasksRes.status === 401) { logout(); router.push('/'); return; }
       const tasks: Task[]        = tasksRes.ok  ? extractArray(await tasksRes.json())          : [];
       const exams: Exam[]        = examsRes?.ok  ? toAnyArray(await examsRes.json()) as Exam[]  : [];
       const slots: ScheduleSlot[] = slotsRes?.ok ? toAnyArray(await slotsRes.json()) as ScheduleSlot[] : [];
@@ -305,7 +305,7 @@ export default function ChildDashboard({ childId }: { childId: number }) {
     if (!authToken) return;
     try {
       const res = await fetch(`${API_URL}${API_ENDPOINTS.CHILDREN.GET(childId)}`, { headers: { 'Authorization': `Bearer ${authToken}` }, signal });
-      if (res.status === 401) { router.push('/'); return; }
+      if (res.status === 401) { logout(); router.push('/'); return; }
       if (res.ok) setChild(await res.json());
     } catch (e) { if ((e as Error).name !== 'AbortError') console.error(e); }
   }
