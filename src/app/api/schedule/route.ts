@@ -111,51 +111,47 @@ export async function PUT(req: NextRequest) {
   return NextResponse.json({ deleted, created: created.length, slots: created });
 }
 
-const SCHEDULE_SYSTEM = `You are parsing an Israeli school weekly timetable (מערכת שעות שבועית).
+const SCHEDULE_SYSTEM = `You extract data from an Israeli school weekly timetable (מערכת שעות שבועית).
 
-STEP 1 — IDENTIFY COLUMNS:
-Count the day columns and read their headers carefully. Each column is exactly ONE day.
-Hebrew day headers: ראשון=Sunday, שני=Monday, שלישי=Tuesday, רביעי=Wednesday, חמישי=Thursday, שישי=Friday
-The table may be RTL (right-to-left), meaning ראשון is on the RIGHT and שישי is on the LEFT.
-Do NOT assign the same day to two columns. Do NOT skip a column.
-⚠️ If a column header says שישי (Friday) but ALL its cells are empty or dashes — skip that column entirely. Do NOT output any Friday entries unless there is actual subject content in the Friday column.
+TABLE LAYOUT:
+- ONE header row: day names (ראשון, שני, שלישי, רביעי, חמישי, and optionally שישי)
+- ONE left column: period labels (1, 2, 3… or שיעור 1, שיעור 2…) — this is a row-index column, NOT a subject
+- Remaining columns: one per school day, each cell contains a subject (and sometimes a teacher name)
+- The table may be RTL: ראשון on the right, שישי on the left
 
-STEP 2 — IDENTIFY ROWS:
-The table has exactly ONE header row (the row with day names). Everything below it is data.
-⚠️ DO NOT SKIP PERIOD 1: The row labeled "1" or "שיעור 1" or "08:00-08:45" is the FIRST DATA ROW — it contains real subjects, not headers. It MUST appear in your output with start_time "08:00".
-Each row is one lesson period, labeled by number (שיעור 1, שיעור 2…) or by time (08:00-08:45).
-Process ALL rows from top to bottom — do NOT skip any row, do NOT stop early. Include every row that has content.
+DAY NAMES → English:
+ראשון=Sunday | שני=Monday | שלישי=Tuesday | רביעי=Wednesday | חמישי=Thursday | שישי=Friday
 
-MANDATORY CHECK: Before outputting, verify your array includes entries with start_time "08:00" (Period 1). If it does not, you skipped the first row — go back and add it.
+PERIOD DEFAULT TIMES (use when the image shows no explicit times):
+Period 1→08:00-08:45 | Period 2→08:55-09:40 | Period 3→09:50-10:35
+Period 4→10:45-11:30 | Period 5→11:40-12:25 | Period 6→12:35-13:20
+Period 7→13:30-14:15 | Period 8→14:25-15:10 | Period 9→15:20-16:05
 
-STEP 3 — READ EACH CELL:
-For every (row, column) cell that has a subject name, output one JSON entry.
+SUBJECT EXTRACTION:
+Each cell has a subject name (larger text) and often a teacher name (smaller text or initials like מ. כהן, ר׳ לוי).
+Output the subject name ONLY. Strip teacher names completely.
+"מתמטיקה / מ. כהן" → "מתמטיקה" | "אנגלית ר׳ לוי" → "אנגלית"
 
-⚠️ CRITICAL — SUBJECT NAME ONLY, NOT TEACHER NAME:
-Each cell typically contains TWO pieces of text: the subject name (larger/first) and the teacher's name (smaller/second, often abbreviated like מ. כהן or ר׳ לוי or just initials).
-Output ONLY the subject name. IGNORE the teacher name completely.
-Examples of what to strip: "מתמטיקה / מ. כהן" → output "מתמטיקה". "אנגלית ר׳ לוי" → output "אנגלית".
+EASILY CONFUSED: ערבית (Arabic: ע-ר-ב) ≠ עברית (Hebrew: ע-ב-ר). Read carefully.
 
-LESSON TIMES — use these when no explicit time is shown:
-Period 1: 08:00-08:45  | Period 2: 08:55-09:40  | Period 3: 09:50-10:35
-Period 4: 10:45-11:30  | Period 5: 11:40-12:25  | Period 6: 12:35-13:20
-Period 7: 13:30-14:15  | Period 8: 14:25-15:10  | Period 9: 15:20-16:05
-
-⚠️ CRITICAL — EASILY CONFUSED HEBREW SUBJECTS:
-- עברית = Hebrew language (letters: ע-ב-ר-י-ת)
-- ערבית = Arabic language (letters: ע-ר-ב-י-ת)
-These look almost identical. Read the second and third letters carefully: ב then ר = עברית, ר then ב = ערבית.
-
-OUTPUT: Return ONLY a JSON array, no markdown, no explanation:
-[{"day_of_week":"Sunday","Subject":"מתמטיקה","start_time":"08:00","endtime":"08:45"}]
+EXAMPLE — for a table with 3 periods and ראשון/שני columns:
+[
+  {"day_of_week":"Sunday","Subject":"מתמטיקה","start_time":"08:00","endtime":"08:45"},
+  {"day_of_week":"Monday","Subject":"אנגלית","start_time":"08:00","endtime":"08:45"},
+  {"day_of_week":"Sunday","Subject":"עברית","start_time":"08:55","endtime":"09:40"},
+  {"day_of_week":"Monday","Subject":"מדע","start_time":"08:55","endtime":"09:40"},
+  {"day_of_week":"Sunday","Subject":"תנ\"ך","start_time":"09:50","endtime":"10:35"},
+  {"day_of_week":"Monday","Subject":"חינוך גופני","start_time":"09:50","endtime":"10:35"}
+]
+Notice: Period 1 (08:00) entries come FIRST and are included — they are data rows, not headers.
 
 RULES:
-- Each column = exactly one unique day. Never duplicate a day.
-- Copy subject names EXACTLY as written — do NOT translate or paraphrase
-- Strip teacher names from subjects — output the subject word(s) only
-- Skip empty cells, dashes, and dots only
-- Include ALL non-empty cells across ALL rows — do not stop before the last row
-- Return [] only if no schedule data exists at all`;
+- Output a flat JSON array, no markdown, no explanation
+- Period 1 (first data row) MUST be in your output — it is NOT a header
+- Each day column = exactly one unique day name; never duplicate a day
+- Skip שישי column entirely if ALL its cells are empty or dashes
+- Skip empty cells, dashes, free-period markers
+- Include every row that has subject content, all the way to the last period`;
 
 
 
@@ -175,7 +171,7 @@ export async function POST(req: NextRequest) {
   const userContent = image_base64
     ? [
         { type: 'image', source: { type: 'base64', media_type: image_type || 'image/jpeg', data: image_base64 } },
-        { type: 'text', text: 'Extract ALL schedule slots from this school timetable image. IMPORTANT: Include Period 1 (שיעור 1, 08:00) — do NOT treat the first data row as a header. Return JSON array only.' },
+        { type: 'text', text: 'Extract every schedule slot from this timetable. Include period 1 (first data row). Output JSON array only.' },
       ]
     : (text ?? '').substring(0, 8000);
 
@@ -190,7 +186,10 @@ export async function POST(req: NextRequest) {
       model: 'claude-sonnet-4-6',
       max_tokens: 8000,
       system: SCHEDULE_SYSTEM,
-      messages: [{ role: 'user', content: userContent }],
+      messages: [
+        { role: 'user', content: userContent },
+        { role: 'assistant', content: '[' }, // prefill: forces AI to output JSON array immediately
+      ],
     }),
   });
 
@@ -200,13 +199,13 @@ export async function POST(req: NextRequest) {
   }
 
   const aiData = await aiRes.json();
-  const raw = (aiData?.content?.[0]?.text ?? '').trim();
+  // Prepend '[' because we prefilled it — the AI response continues from after the prefill
+  const raw = '[' + (aiData?.content?.[0]?.text ?? '').trim();
   console.log('[/api/schedule POST] AI raw (first 600):', raw.substring(0, 600));
 
   let slots: Array<{ day_of_week: string; Subject: string; start_time: string; endtime: string }> = [];
   try {
-    const cleaned = raw.replace(/```(?:json)?\n?/g, '').trim();
-    const match = cleaned.match(/\[[\s\S]*\]/);
+    const match = raw.match(/\[[\s\S]*\]/);
     if (match) slots = JSON.parse(match[0]);
   } catch {
     return NextResponse.json({ error: 'לא הצלחתי לקרוא את התגובה מה-AI' }, { status: 422 });
