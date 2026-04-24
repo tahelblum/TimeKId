@@ -102,10 +102,20 @@ function toAnyArray(d: unknown): unknown[] {
   }
   return [];
 }
+function examDateStr(raw: string | number): string {
+  const s = String(raw);
+  // Xano may return a Unix timestamp (ms) instead of YYYY-MM-DD
+  if (/^\d{10,}$/.test(s)) {
+    const d = new Date(Number(s));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  return s.substring(0, 10); // trim ISO strings like "2026-05-15T00:00:00.000Z"
+}
 function examToTask(exam: Exam, days: Date[]): Task | null {
   if (!exam.exam_date) return null;
+  const dateStr = examDateStr(exam.exam_date as unknown as string | number);
   const hour = exam.exam_time ? parseTimeHour(exam.exam_time) : 12;
-  const due_date = tsFromDateAndHour(exam.exam_date, hour);
+  const due_date = tsFromDateAndHour(dateStr, hour);
   const now = Math.floor(Date.now() / 1000);
   const status = due_date < now ? 'done' : 'pending';
   return { id: -(exam.id * 1000 + 500), title: exam.notes || 'מבחן', description: exam.notes || '',
@@ -888,7 +898,8 @@ export default function KidDashboard() {
 
   const doneCnt = visibleTasks.filter(t => t.status === 'done').length;
   const pendingTasks = visibleTasks.filter(t => t.status !== 'done');
-  const upcomingTests = allRealTasksState.filter(t => isTest(t) && t.status !== 'done' && daysUntil(t.due_date) >= 0 && daysUntil(t.due_date) <= 14);
+  // Include both regular tasks and virtual exam tasks from cached.exams
+  const upcomingTests = weekAllTasks.filter(t => isTest(t) && t.status !== 'done' && daysUntil(t.due_date) >= 0 && daysUntil(t.due_date) <= 14);
   // Tests within 7 days that have no study tasks yet
   const testsNeedingPlan = upcomingTests.filter(t =>
     daysUntil(t.due_date) <= 7 &&

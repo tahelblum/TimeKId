@@ -186,10 +186,7 @@ export async function POST(req: NextRequest) {
       model: 'claude-sonnet-4-6',
       max_tokens: 8000,
       system: SCHEDULE_SYSTEM,
-      messages: [
-        { role: 'user', content: userContent },
-        { role: 'assistant', content: '[' }, // prefill: forces AI to output JSON array immediately
-      ],
+      messages: [{ role: 'user', content: userContent }],
     }),
   });
 
@@ -199,13 +196,13 @@ export async function POST(req: NextRequest) {
   }
 
   const aiData = await aiRes.json();
-  // Prepend '[' because we prefilled it — the AI response continues from after the prefill
-  const raw = '[' + (aiData?.content?.[0]?.text ?? '').trim();
+  const raw = (aiData?.content?.[0]?.text ?? '').trim();
   console.log('[/api/schedule POST] AI raw (first 600):', raw.substring(0, 600));
 
   let slots: Array<{ day_of_week: string; Subject: string; start_time: string; endtime: string }> = [];
   try {
-    const match = raw.match(/\[[\s\S]*\]/);
+    const cleaned = raw.replace(/```(?:json)?\n?/g, '').trim();
+    const match = cleaned.match(/\[[\s\S]*\]/);
     if (match) slots = JSON.parse(match[0]);
   } catch {
     return NextResponse.json({ error: 'לא הצלחתי לקרוא את התגובה מה-AI' }, { status: 422 });
