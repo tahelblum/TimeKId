@@ -121,9 +121,12 @@ Do NOT assign the same day to two columns. Do NOT skip a column.
 ⚠️ If a column header says שישי (Friday) but ALL its cells are empty or dashes — skip that column entirely. Do NOT output any Friday entries unless there is actual subject content in the Friday column.
 
 STEP 2 — IDENTIFY ROWS:
-The FIRST row after the header is Period 1 (שיעור 1 / 08:00). It is a lesson row, NOT a header — include it.
+The table has exactly ONE header row (the row with day names). Everything below it is data.
+⚠️ DO NOT SKIP PERIOD 1: The row labeled "1" or "שיעור 1" or "08:00-08:45" is the FIRST DATA ROW — it contains real subjects, not headers. It MUST appear in your output with start_time "08:00".
 Each row is one lesson period, labeled by number (שיעור 1, שיעור 2…) or by time (08:00-08:45).
-Process ALL rows from top to bottom — do NOT skip the first lesson row, do NOT stop early. Include every row that has content.
+Process ALL rows from top to bottom — do NOT skip any row, do NOT stop early. Include every row that has content.
+
+MANDATORY CHECK: Before outputting, verify your array includes entries with start_time "08:00" (Period 1). If it does not, you skipped the first row — go back and add it.
 
 STEP 3 — READ EACH CELL:
 For every (row, column) cell that has a subject name, output one JSON entry.
@@ -172,7 +175,7 @@ export async function POST(req: NextRequest) {
   const userContent = image_base64
     ? [
         { type: 'image', source: { type: 'base64', media_type: image_type || 'image/jpeg', data: image_base64 } },
-        { type: 'text', text: 'Extract all schedule slots from this school timetable image. Return JSON array only.' },
+        { type: 'text', text: 'Extract ALL schedule slots from this school timetable image. IMPORTANT: Include Period 1 (שיעור 1, 08:00) — do NOT treat the first data row as a header. Return JSON array only.' },
       ]
     : (text ?? '').substring(0, 8000);
 
