@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify({
             exam_date: item.exam_date,
             exam_time: item.exam_time || '08:00',
-            notes: item.notes || item.subject || 'מבחן',
+            notes: [item.subject, item.notes].filter(Boolean).join(' – ') || 'מבחן',
           }),
         });
         if (r.ok) created.push(await r.json());
